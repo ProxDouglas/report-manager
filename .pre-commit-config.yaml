@@ -1,0 +1,29 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=10240]
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-json
+
+  - repo: local
+    hooks:
+      - id: backend-ruff
+        name: backend ruff
+        entry: .venv/bin/python -m ruff check backend
+        language: system
+        pass_filenames: false
+      - id: frontend-typecheck
+        name: frontend typecheck
+        entry: npm --prefix frontend run typecheck
+        language: system
+        pass_filenames: false
+      - id: sensitive-file-names
+        name: sensitive file names
+        entry: scripts/check-sensitive-files.sh
+        language: script

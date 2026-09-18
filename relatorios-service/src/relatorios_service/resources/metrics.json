@@ -1,0 +1,606 @@
+[
+  {
+    "key": "employee_terminations",
+    "label": "Desligamentos de colaboradores",
+    "description": "Quantidade de desligamentos de colaboradores em um período.",
+    "business_rule": "Conte somente registros cujo termination_type seja DISMISSAL, salvo solicitação explícita de outro tipo.",
+    "allowed_tables": ["employee_terminations"],
+    "allowed_columns": {
+      "employee_terminations": [
+        "employee_id",
+        "termination_date",
+        "termination_type",
+        "reason"
+      ]
+    },
+    "known_columns": ["employee_id", "termination_date", "termination_type", "reason"],
+    "allowed_dimensions": ["month", "termination_type", "reason"],
+    "synonyms": ["demissões", "demitidos", "desligamentos"]
+  },
+  {
+    "key": "medical_leave_events",
+    "label": "Afastamentos por atestado",
+    "description": "Quantidade de eventos de afastamento motivados por atestado médico.",
+    "business_rule": "Conte somente registros cujo leave_type seja MEDICAL_CERTIFICATE, salvo solicitação explícita de outro tipo.",
+    "allowed_tables": ["employee_leaves"],
+    "allowed_columns": {
+      "employee_leaves": [
+        "employee_id",
+        "leave_date",
+        "leave_type",
+        "days",
+        "reason"
+      ]
+    },
+    "known_columns": ["employee_id", "leave_date", "leave_type", "days", "reason"],
+    "allowed_dimensions": ["month", "leave_type", "reason"],
+    "synonyms": ["afastamentos", "atestados", "afastamentos médicos"]
+  },
+  {
+    "key": "allocated_employees_by_cost_center",
+    "label": "Colaboradores alocados por centro de custo",
+    "description": "Quantidade de colaboradores com distribuição registrada por centro de custo em uma data.",
+    "business_rule": "Use distribuicao.dat como data da alocação. Relacione distribuicao a funcionario por emp_id, tipo e mat_id. Relacione funcionario a centro_custo por emp_id e ccu_id. Conte colaboradores distintos pela combinação emp_id, tipo e mat_id. Ignore registros em que distribuicao.deleted, funcionario.deleted ou centro_custo.deleted sejam true. Para agrupamento por centro de custo, use centro_custo.descr e considere 'Sem centro de custo' quando não houver descrição.",
+    "allowed_tables": ["distribuicao", "funcionario", "centro_custo"],
+    "allowed_columns": {
+      "distribuicao": ["emp_id", "tipo", "mat_id", "dat", "deleted"],
+      "funcionario": [
+        "emp_id",
+        "tipo",
+        "mat_id",
+        "nome",
+        "ccu_id",
+        "deleted"
+      ],
+      "centro_custo": ["emp_id", "ccu_id", "descr", "deleted"]
+    },
+    "known_columns": [
+      "emp_id",
+      "tipo",
+      "mat_id",
+      "dat",
+      "deleted",
+      "nome",
+      "ccu_id",
+      "descr"
+    ],
+    "allowed_dimensions": ["cost_center", "date", "month"],
+    "synonyms": [
+      "colaboradores alocados",
+      "colaboradores na distribuição",
+      "distribuição por centro de custo",
+      "alocação por centro de custo",
+      "centro de custo"
+    ]
+  },
+  {
+    "key": "allocation_vs_demand",
+    "label": "Alocação versus demanda em horas",
+    "description": "Compara horas alocadas e horas de demanda pela dimensão solicitada.",
+    "business_rule": "Para allocation_hours, some os valores de distribuicao.hor_00 até distribuicao.hor_23 após aplicar o período em distribuicao.dat, ignorar deleted=true e relacionar o colaborador pela chave composta emp_id, tipo e mat_id. Para demand_hours, restr_emp.restricao e restr_fil.restricao contêm um JSON semanal com 24 valores por dia; retorne o valor bruto para o parser weekly_24h_json da aplicação, que seleciona o dia da semana e soma as horas. Use configuracao.demanda para decidir qual origem representa a demanda: restr_emp para empresa ou restr_fil para filial; os valores armazenados em configuracao.demanda devem ser confirmados no banco. Não conte restr_id como demanda. Agregue alocação e demanda separadamente antes de relacioná-las para evitar multiplicação por colaboradores ou dias. Se a tabela de demanda não possuir data, expanda a escala semanal usando analysis_date e não multiplique o valor pela quantidade de dias sem uma regra de negócio explícita. Quando houver comparação, retorne allocation_hours, demand_schedule e analysis_date, agrupados pela mesma dimensão e período. O déficit é demand_hours menos allocation_hours e o percentual de cobertura é allocation_hours dividido por demand_hours vezes 100; para demanda igual a zero, coverage_percent deve ser nulo.",
+    "allowed_tables": [
+      "distribuicao",
+      "funcionario",
+      "empresa",
+      "filial",
+      "configuracao",
+      "restr_emp",
+      "restr_fil"
+    ],
+    "known_columns": [
+      "emp_id",
+      "tipo",
+      "mat_id",
+      "dat",
+      "deleted",
+      "fil_id",
+      "nome",
+      "demanda",
+      "restricao",
+      "restr_id",
+      "hor_00",
+      "hor_01",
+      "hor_02",
+      "hor_03",
+      "hor_04",
+      "hor_05",
+      "hor_06",
+      "hor_07",
+      "hor_08",
+      "hor_09",
+      "hor_10",
+      "hor_11",
+      "hor_12",
+      "hor_13",
+      "hor_14",
+      "hor_15",
+      "hor_16",
+      "hor_17",
+      "hor_18",
+      "hor_19",
+      "hor_20",
+      "hor_21",
+      "hor_22",
+      "hor_23"
+    ],
+    "allowed_dimensions": [
+      "date",
+      "month",
+      "employee",
+      "branch"
+    ],
+    "allowed_measures": [
+      "allocation_hours",
+      "demand_hours",
+      "deficit_hours",
+      "coverage_percent"
+    ],
+    "measures": {
+      "allocation_hours": {
+        "table": "distribuicao",
+        "columns": [
+          "hor_00",
+          "hor_01",
+          "hor_02",
+          "hor_03",
+          "hor_04",
+          "hor_05",
+          "hor_06",
+          "hor_07",
+          "hor_08",
+          "hor_09",
+          "hor_10",
+          "hor_11",
+          "hor_12",
+          "hor_13",
+          "hor_14",
+          "hor_15",
+          "hor_16",
+          "hor_17",
+          "hor_18",
+          "hor_19",
+          "hor_20",
+          "hor_21",
+          "hor_22",
+          "hor_23"
+        ],
+        "parser": "passthrough",
+        "unit": "person_hours"
+      },
+      "demand_hours": {
+        "tables": ["restr_emp", "restr_fil"],
+        "column": "restricao",
+        "parser": "weekly_24h_json",
+        "input_type": "json_text_or_object",
+        "json_path": ["demanda"],
+        "unit": "person_hours",
+        "hours_per_day": 24,
+        "required_days": [
+          "domingo",
+          "segunda",
+          "terca",
+          "quarta",
+          "quinta",
+          "sexta",
+          "sabado"
+        ],
+        "raw_alias": "demand_schedule",
+        "date_alias": "analysis_date",
+        "on_error": "quarantine",
+        "example_value": {
+          "demanda": {
+            "domingo": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              4, 4, 4, 4, 0, 4, 4, 4,
+              4, 4, 0, 0, 0, 0, 0, 0
+            ],
+            "segunda": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              4, 4, 4, 4, 0, 4, 4, 4,
+              4, 4, 0, 0, 0, 0, 0, 0
+            ],
+            "terca": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              4, 4, 4, 4, 0, 4, 4, 4,
+              4, 4, 0, 0, 0, 0, 0, 0
+            ],
+            "quarta": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              4, 4, 4, 4, 0, 4, 4, 4,
+              4, 4, 0, 0, 0, 0, 0, 0
+            ],
+            "quinta": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              4, 4, 4, 4, 0, 4, 4, 4,
+              4, 4, 0, 0, 0, 0, 0, 0
+            ],
+            "sexta": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              4, 4, 4, 4, 0, 4, 4, 4,
+              4, 4, 0, 0, 0, 0, 0, 0
+            ],
+            "sabado": [
+              0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0
+            ]
+          }
+        }
+      }
+    },
+    "semantic_mappings": {
+      "company_name": {
+        "table": "empresa",
+        "column": "descr",
+        "aliases": ["empresa", "nome da empresa", "companhia"],
+        "parameter": "filter_company_name",
+        "description": "Nome da empresa informado pelo usuário."
+      },
+      "company_id": {
+        "table": "empresa",
+        "column": "emp_id",
+        "aliases": ["código da empresa", "codigo da empresa", "id da empresa"],
+        "parameter": "filter_company_id",
+        "description": "Identificador da empresa."
+      },
+      "analysis_date": {
+        "table": "distribuicao",
+        "column": "dat",
+        "aliases": ["data", "dia", "data da alocação", "data da alocacao"],
+        "parameter": "filter_analysis_date",
+        "value_type": "date",
+        "description": "Data usada para filtrar a distribuição."
+      },
+      "branch_name": {
+        "table": "filial",
+        "column": "descr",
+        "aliases": ["filial", "nome da filial"],
+        "parameter": "filter_branch_name",
+        "description": "Nome da filial informado pelo usuário."
+      }
+    },
+    "synonyms": [
+      "alocação versus demanda",
+      "alocacao versus demanda",
+      "alocação vs demanda",
+      "alocacao vs demanda",
+      "horas alocadas",
+      "horas demandadas",
+      "cobertura de demanda",
+      "déficit de horas",
+      "deficit de horas"
+    ],
+    "allowed_columns": {
+      "configuracao": ["demanda"],
+      "distribuicao": [
+        "emp_id",
+        "tipo",
+        "mat_id",
+        "dat",
+        "deleted",
+        "hor_00",
+        "hor_01",
+        "hor_02",
+        "hor_03",
+        "hor_04",
+        "hor_05",
+        "hor_06",
+        "hor_07",
+        "hor_08",
+        "hor_09",
+        "hor_10",
+        "hor_11",
+        "hor_12",
+        "hor_13",
+        "hor_14",
+        "hor_15",
+        "hor_16",
+        "hor_17",
+        "hor_18",
+        "hor_19",
+        "hor_20",
+        "hor_21",
+        "hor_22",
+        "hor_23"
+      ],
+      "funcionario": [
+        "emp_id",
+        "tipo",
+        "mat_id",
+        "fil_id",
+        "deleted"
+      ],
+      "empresa": ["emp_id", "descr"],
+      "filial": ["emp_id", "fil_id", "descr", "deleted"],
+      "restr_emp": ["emp_id", "restr_id", "restricao"],
+      "restr_fil": ["emp_id", "fil_id", "restr_id", "restricao"]
+    },
+    "table_descriptions": {
+      "configuracao": "Configuração do sistema; a coluna demanda define a origem da demanda.",
+      "distribuicao": "Distribuição diária com os valores horários hor_00 até hor_23.",
+      "funcionario": "Cadastro dos colaboradores e sua filial.",
+      "empresa": "Empresas usadas para relacionar restrições por empresa.",
+      "filial": "Filiais usadas para agrupar a comparação.",
+      "restr_emp": "Demanda em horas por empresa na coluna restricao.",
+      "restr_fil": "Demanda em horas por filial na coluna restricao."
+    },
+    "source_mapping": {
+      "allocation_hours": "distribuicao.hor_00 ... distribuicao.hor_23",
+      "demand_hours_by_company": "restr_emp.restricao",
+      "demand_hours_by_branch": "restr_fil.restricao",
+      "demand_source": "configuracao.demanda"
+    }
+  },
+  {
+    "key": "demand_restrictions",
+    "label": "Restrições de demanda",
+    "description": "Restrições usadas para definir a demanda de distribuição.",
+    "business_rule": "Use a tabela configuracao e a coluna configuracao.demanda para identificar o tipo de demanda. Importante: demanda é uma coluna, não uma tabela; nunca use FROM demanda ou JOIN demanda. Use somente a tabela de restrição correspondente ao tipo identificado. A coluna restricao contém o valor da restrição. Nunca consulte tabelas de restrição fora do mapeamento autorizado. Os valores exatos armazenados em configuracao.demanda devem ser confirmados no banco do cliente.",
+    "allowed_tables": [
+      "configuracao",
+      "restr_emp",
+      "restr_fil",
+      "restr_ccusto",
+      "restr_posto",
+      "restr_subf"
+    ],
+    "known_columns": [
+      "demanda",
+      "restricao",
+      "emp_id",
+      "fil_id",
+      "ccu_id",
+      "restr_id",
+      "estrut_id",
+      "posto_id",
+      "subf_id"
+    ],
+    "allowed_dimensions": [
+      "demand_type",
+      "restriction",
+      "restriction_table"
+    ],
+    "synonyms": [
+      "tipo de demanda",
+      "restrições de demanda",
+      "restricao de demanda",
+      "restrições de distribuição",
+      "regra de demanda"
+    ],
+    "allowed_columns": {
+      "configuracao": ["demanda"],
+      "restr_emp": ["emp_id", "restr_id", "restricao"],
+      "restr_fil": ["emp_id", "fil_id", "restr_id", "restricao"],
+      "restr_ccusto": ["emp_id", "ccu_id", "restr_id", "restricao"],
+      "restr_posto": ["estrut_id", "posto_id", "restr_id", "restricao"],
+      "restr_subf": [
+        "estrut_id",
+        "posto_id",
+        "subf_id",
+        "restr_id",
+        "restricao"
+      ]
+    },
+    "table_descriptions": {
+      "configuracao": "Configuração do sistema. A coluna demanda informa o tipo de demanda; demanda não é uma tabela.",
+      "restr_emp": "Restrições vinculadas à empresa.",
+      "restr_fil": "Restrições vinculadas à filial.",
+      "restr_ccusto": "Restrições vinculadas ao centro de custo.",
+      "restr_posto": "Restrições vinculadas ao posto de trabalho.",
+      "restr_subf": "Restrições vinculadas à subfunção."
+    },
+    "source_mapping": {
+      "empresa": "restr_emp",
+      "filial": "restr_fil",
+      "centro_custo": "restr_ccusto",
+      "posto": "restr_posto",
+      "subfuncao": "restr_subf"
+    }
+  },
+  {
+    "key": "generic_analysis",
+    "label": "Análise genérica das tabelas autorizadas",
+    "description": "Permite analisar perguntas que não correspondem a uma métrica específica, usando somente as tabelas cadastradas.",
+    "business_rule": "Interprete somente o pedido do usuário e use as tabelas, colunas e relacionamentos disponíveis na estrutura autorizada. Não invente regras de negócio. Quando a pergunta mencionar colaboradores, preserve a chave composta emp_id, tipo e mat_id. Ignore registros deleted quando isso representar exclusão lógica. Escolha os joins usando chaves primárias e estrangeiras da estrutura do banco. Quando a pergunta comparar alocação e demanda em horas, use a métrica allocation_vs_demand e os aliases allocation_hours e demand_schedule. Nesta base, restr_emp.restricao e restr_fil.restricao representam uma escala semanal JSON de demanda, apesar do nome da coluna.",
+    "allowed_tables": [
+      "abrang_hor",
+      "agendamento",
+      "agend_exec",
+      "ausencia",
+      "auditoria_evento",
+      "centro_custo",
+      "configuracao",
+      "distribuicao",
+      "emails_wfm",
+      "empresa",
+      "escala",
+      "escala_realizada",
+      "estrutura_posto",
+      "filial",
+      "funcionario",
+      "funcionario_usuario",
+      "hor_marc",
+      "horario",
+      "integra_senior",
+      "lobwfm_migration",
+      "log_aplicacao",
+      "migration_teste",
+      "notificacao",
+      "notificacao_destinatario",
+      "notificacao_entrega",
+      "password_reset_token",
+      "perfil",
+      "perfil_permissao",
+      "permissao",
+      "posto",
+      "restr_emp",
+      "restr_fil",
+      "restr_ccusto",
+      "restr_dem_exc",
+      "restr_posto",
+      "restr_subf",
+      "restricao",
+      "report_status_color",
+      "senior_connect_integration",
+      "senior_connect_integration_error",
+      "subfuncao",
+      "tipo_ausencia",
+      "usuario"
+    ],
+    "known_columns": [
+      "agd_id",
+      "ativo",
+      "alocacao_minima",
+      "demanda",
+      "dat",
+      "dat_ini",
+      "deleted",
+      "descr",
+      "emp_id",
+      "estrut_id",
+      "fil_id",
+      "mat_id",
+      "nome",
+      "ccu_id",
+      "cod_aus",
+      "posto_id",
+      "restr_id",
+      "restricao",
+      "subf_id",
+      "tipo",
+      "tipo_aus",
+      "uti_ccusto",
+      "uti_filial",
+      "uti_subfnc"
+    ],
+    "allowed_dimensions": [
+      "date",
+      "month",
+      "employee",
+      "cost_center",
+      "branch",
+      "workplace",
+      "subfunction",
+      "restriction",
+      "demand_type"
+    ],
+    "allowed_measures": [
+      "employee_count",
+      "allocation_hours",
+      "demand_hours",
+      "deficit_hours",
+      "coverage_percent"
+    ],
+    "synonyms": [
+      "análise",
+      "analise",
+      "comparar",
+      "quantos",
+      "quais",
+      "por filial",
+      "por posto",
+      "por centro de custo",
+      "não alocados",
+      "nao alocados"
+    ],
+    "allowed_columns": {
+      "agendamento": [
+        "agd_id",
+        "nome",
+        "ativo",
+        "alocacao_minima",
+        "tipo_exec",
+        "tipo_execucao"
+      ],
+      "ausencia": [
+        "emp_id",
+        "mat_id",
+        "tipo",
+        "dat_ini",
+        "tipo_aus"
+      ],
+      "centro_custo": ["emp_id", "ccu_id", "descr", "deleted"],
+      "configuracao": [
+        "demanda",
+        "uti_ccusto",
+        "uti_filial",
+        "uti_subfnc"
+      ],
+      "distribuicao": [
+        "emp_id",
+        "tipo",
+        "mat_id",
+        "dat",
+        "deleted"
+      ],
+      "empresa": ["emp_id", "descr"],
+      "estrutura_posto": ["cod_estrutura"],
+      "filial": ["emp_id", "fil_id", "deleted"],
+      "funcionario": [
+        "emp_id",
+        "tipo",
+        "mat_id",
+        "nome",
+        "estrut_id",
+        "posto_id",
+        "subf_id",
+        "fil_id",
+        "ccu_id",
+        "deleted"
+      ],
+      "posto": ["estrut_id", "posto_id"],
+      "restr_emp": ["emp_id", "restr_id", "restricao"],
+      "restr_fil": ["emp_id", "fil_id", "restr_id", "restricao"],
+      "restr_ccusto": ["emp_id", "ccu_id", "restr_id", "restricao"],
+      "restr_posto": [
+        "estrut_id",
+        "posto_id",
+        "restr_id",
+        "restricao"
+      ],
+      "restr_subf": [
+        "estrut_id",
+        "posto_id",
+        "subf_id",
+        "restr_id",
+        "restricao"
+      ],
+      "subfuncao": ["estrut_id", "posto_id", "subf_id"],
+      "tipo_ausencia": ["cod_aus"]
+    },
+    "semantic_mappings": {
+      "company_name": {
+        "table": "empresa",
+        "column": "descr",
+        "aliases": ["empresa", "nome da empresa", "companhia"],
+        "parameter": "filter_company_name",
+        "description": "Nome da empresa informado pelo usuário."
+      },
+      "company_id": {
+        "table": "empresa",
+        "column": "emp_id",
+        "aliases": ["código da empresa", "codigo da empresa", "id da empresa"],
+        "parameter": "filter_company_id",
+        "description": "Identificador da empresa."
+      }
+    },
+    "table_descriptions": {
+      "agendamento": "Configuração de agendamentos e parâmetros de alocação.",
+      "ausencia": "Ausências dos colaboradores.",
+      "centro_custo": "Centros de custo.",
+      "configuracao": "Configuração do sistema; a coluna demanda informa o tipo de demanda e não representa uma tabela.",
+      "distribuicao": "Distribuição diária dos colaboradores.",
+      "estrutura_posto": "Estruturas de postos de trabalho.",
+      "filial": "Filiais.",
+      "funcionario": "Cadastro de colaboradores.",
+      "posto": "Postos de trabalho.",
+      "restr_emp": "Restrições por empresa.",
+      "restr_fil": "Restrições por filial.",
+      "restr_ccusto": "Restrições por centro de custo.",
+      "restr_posto": "Restrições por posto de trabalho.",
+      "restr_subf": "Restrições por subfunção.",
+      "subfuncao": "Subfunções dos postos.",
+      "tipo_ausencia": "Tipos de ausência."
+    }
+  }
+]

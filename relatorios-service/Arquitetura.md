@@ -19,7 +19,7 @@ Plotly e a exportação de relatórios. Essa camada está concentrada em:
   respostas da API;
 - `src/relatorios_service/analysis_service.py`: orquestração do caso de uso de
   análise;
-- `src/relatorios_service/metric_catalog.py` e
+- `src/relatorios_service/metric_catalog.py` e o catálogo local
   `src/relatorios_service/resources/metrics.json`: vocabulário e regras de
   negócio autorizados;
 - `src/relatorios_service/sql_safety.py`: validação da SQL produzida pelo
@@ -95,7 +95,8 @@ relatorios-service/
     ├── schemas.py
     ├── sql_safety.py
     └── resources/
-        └── metrics.json
+        ├── metrics.example.json
+        └── metrics.json (criado localmente e ignorado pelo Git)
 ```
 
 O pacote usa o layout `src`. Por isso, a instalação editável (`pip install -e
@@ -245,15 +246,15 @@ distintos, cada série deve referenciar seu componente com `component_id`:
     "series": [
       {
         "column": "demand_hours",
-        "component_id": "empresa_teste",
+        "component_id": "grupo_exemplo_a",
         "chart_type": "bar",
-        "label": "Empresa Teste"
+        "label": "Grupo Exemplo A"
       },
       {
         "column": "demand_hours",
-        "component_id": "rota_sul",
+        "component_id": "grupo_exemplo_b",
         "chart_type": "line",
-        "label": "Rota Sul Distribuição"
+        "label": "Grupo Exemplo B"
       }
     ]
   }
@@ -486,7 +487,9 @@ real precisa existir no banco antes de uma métrica ser utilizada.
 
 ## 8. Catálogo de métricas como fronteira de negócio
 
-`metrics.json` é a fonte operacional do catálogo. Cada entrada possui:
+`metrics.json` é a fonte operacional local do catálogo. O repositório publica
+somente `metrics.example.json`, com nomes e valores fictícios. Cada entrada do
+catálogo possui:
 
 - `key`: identificador estável usado pelo plano;
 - `label` e `description`: contexto semântico;
@@ -501,13 +504,14 @@ real precisa existir no banco antes de uma métrica ser utilizada.
 
 Ao adicionar uma métrica, o fluxo recomendado é:
 
-1. confirmar o schema e a regra com o responsável pelo banco/negócio;
-2. atualizar `src/relatorios_service/resources/metrics.json`;
-3. documentar a métrica em [docs/metric_catalog.md](docs/metric_catalog.md);
-4. criar casos de teste para pergunta, SQL gerada, regra de negócio e
+1. copiar `metrics.example.json` para `metrics.json` no ambiente local;
+2. confirmar o schema e a regra com o responsável pelo banco/negócio;
+3. atualizar somente o arquivo local `src/relatorios_service/resources/metrics.json`;
+4. documentar a métrica sem incluir nomes do banco em arquivos públicos;
+5. criar casos de teste para pergunta, SQL gerada, regra de negócio e
    resultado esperado;
-5. validar a métrica contra cada banco suportado quando houver diferenças de
-   dialeto.
+6. validar a métrica contra cada banco suportado quando houver diferenças de
+  dialeto.
 
 O catálogo é pequeno e enviado diretamente ao modelo. A introspecção do banco
 confirma tipos, chaves e existência somente das tabelas e colunas cadastradas;

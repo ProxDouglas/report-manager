@@ -1,0 +1,88 @@
+[
+  {
+    "key": "example_metric",
+    "label": "Métrica de exemplo",
+    "description": "Quantidade e valor dos registros de uma tabela fictícia.",
+    "business_rule": "Considere somente registros com status ACTIVE e agregue os valores sem inventar regras que não estejam descritas neste catálogo.",
+    "tables": {
+      "example_table": {
+        "description": "Tabela fictícia usada somente para demonstrar o formato do catálogo.",
+        "columns": {
+          "id": {
+            "description": "Identificador do registro.",
+            "example_value": "EXAMPLE-001"
+          },
+          "record_date": {
+            "description": "Data associada ao registro.",
+            "example_value": "2026-01-15"
+          },
+          "status": {
+            "description": "Situação do registro.",
+            "example_value": "ACTIVE"
+          },
+          "amount": {
+            "description": "Valor numérico do registro.",
+            "example_value": 123.45
+          }
+        }
+      }
+    },
+    "allowed_dimensions": [
+      "date",
+      "status"
+    ],
+    "allowed_measures": [
+      "record_count",
+      "total_amount"
+    ],
+    "measures": {
+      "record_count": {
+        "table": "example_table",
+        "column": "id",
+        "parser": "passthrough",
+        "unit": "records"
+      },
+      "total_amount": {
+        "table": "example_table",
+        "column": "amount",
+        "parser": "numeric",
+        "unit": "currency"
+      }
+    },
+    "semantic_mappings": {
+      "record_date": {
+        "table": "example_table",
+        "column": "record_date",
+        "aliases": [
+          "data",
+          "período"
+        ],
+        "parameter": "filter_record_date",
+        "value_type": "date",
+        "description": "Data usada para filtrar ou agrupar os registros."
+      },
+      "record_status": {
+        "table": "example_table",
+        "column": "status",
+        "aliases": [
+          "situação",
+          "status"
+        ],
+        "parameter": "filter_status",
+        "value_type": "text",
+        "description": "Situação usada para filtrar os registros."
+      }
+    },
+    "synonyms": [
+      "registros",
+      "quantidade",
+      "valor total"
+    ],
+    "source_mapping": {
+      "records": "example_table",
+      "date": "example_table.record_date",
+      "status": "example_table.status",
+      "amount": "example_table.amount"
+    }
+  }
+]

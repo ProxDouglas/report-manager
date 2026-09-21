@@ -270,7 +270,7 @@ Exemplo de corpo:
 
 ```json
 {
-  "question": "Compare a demanda mensal das empresas Empresa Teste e Rota Sul Distribuição em 2026",
+  "question": "Compare a métrica mensal entre o Grupo Exemplo A e o Grupo Exemplo B em 2026",
   "export_formats": []
 }
 ```
@@ -292,119 +292,46 @@ Quando houver dados suficientes para gerar um gráfico, `chart.json` contém a
 estrutura Plotly e `chart.html` contém uma página HTML autocontida pronta para
 abrir no navegador.
 
-As métricas e suas regras ficam em:
+As métricas e suas regras ficam em três arquivos com finalidades diferentes:
 
 ```text
-src/relatorios_service/resources/metrics.json
-docs/metric_catalog.md
+src/relatorios_service/resources/metrics.json          # local e privado
+src/relatorios_service/resources/metrics.example.json  # exemplo versionado
+docs/metric_catalog.md                                 # instruções
 ```
 
-A métrica `generic_analysis` concentra as consultas autorizadas deste fluxo e
-permite combinar componentes, dimensões mensais, filtros de empresa e as
-medidas `allocation_hours` e `demand_hours`. A demanda é lida das tabelas de
-restrição autorizadas e normalizada a partir da escala semanal cadastrada.
+Antes de iniciar a aplicação em um clone novo, crie o arquivo privado a partir
+do exemplo:
 
-Nesse modelo, `demanda` é uma coluna de `configuracao`, não uma tabela. Portanto,
-a consulta deve usar `configuracao.demanda` e nunca `FROM demanda` ou
-`JOIN demanda`.
-
-O JSON é usado pela aplicação para validação. O Markdown serve como documentação
-para o time. Nesta primeira versão não é necessário usar RAG: o catálogo é
-pequeno e é enviado diretamente ao modelo. RAG será útil quando houver muitas
-políticas, manuais e regras espalhadas em documentos.
-
-Além das métricas específicas, o catálogo possui `generic_analysis`. Ela permite
-que a LLM escolha mais de uma tabela autorizada para responder à pergunta. O
-plano retorna as tabelas escolhidas no campo `tables`, e a aplicação envia para
-o modelo somente as colunas cadastradas no bloco `tables` do catálogo, junto
-com o contexto da tabela, a descrição da coluna e, quando necessário, um
-`example_value` do formato armazenado. A aplicação também envia chaves
-primárias e chaves estrangeiras dessas tabelas. Os joins podem ser montados
-pela LLM a partir dessa estrutura; não é necessário cadastrar cada join
-manualmente.
-
-A lista de tabelas continua sendo uma restrição obrigatória. Se o SQL mencionar
-uma tabela que não esteja na lista de tabelas autorizadas e selecionadas para o
-plano, a consulta será rejeitada antes de chegar ao banco.
-
-### Colunas, mapeamentos semânticos e parâmetros
-
-O catálogo separa autorização estrutural de valores informados pelo usuário:
-
-- `tables` define a allowlist. Cada tabela possui `description` e um mapa
-  `columns` com a descrição e o exemplo opcional de cada coluna;
-- `semantic_mappings` traduz termos da pergunta para identificadores físicos,
-  como `empresa` ou `nome da empresa` para `empresa.descr`;
-- valores como `Empresa Teste`, datas e IDs não precisam ser cadastrados como
-  permissões.
-
-Os valores dos filtros são retornados pelo plano SQL em `parameters` e usados
-como parâmetros nomeados pelo SQLAlchemy. Eles não devem ser concatenados na
-consulta. Antes da execução, a aplicação valida as tabelas, as colunas
-qualificadas e os placeholders utilizados pela consulta.
-
-As listas legadas `allowed_tables`, `allowed_columns` e `known_columns` são
-derivadas em memória do bloco `tables` para manter compatibilidade interna;
-elas não precisam ser repetidas no `metrics.json`.
-
-Exemplo de mapeamento:
-
-```json
-"semantic_mappings": {
-  "company_name": {
-    "table": "empresa",
-    "column": "descr",
-    "aliases": ["empresa", "nome da empresa"],
-    "parameter": "filter_company_name",
-    "value_type": "text"
-  }
-}
+```bash
+cp src/relatorios_service/resources/metrics.example.json \
+  src/relatorios_service/resources/metrics.json
 ```
 
-Para a pergunta `quantas horas foram alocadas para a empresa Empresa Teste?`,
-o SQL deve usar `empresa.descr` e um placeholder como
-`:filter_company_name`, com o valor separado no objeto `parameters`.
+No PowerShell:
 
-### Comparação de alocação e demanda em horas
-
-Perguntas que mencionarem comparação de alocação e demanda em horas usam a
-métrica `generic_analysis`. O plano orienta a LLM a retornar as medidas:
-
-```text
-allocation_hours
-demand_hours
+```powershell
+Copy-Item src/relatorios_service/resources/metrics.example.json `
+  src/relatorios_service/resources/metrics.json
 ```
 
-`allocation_hours` é calculada pela soma de `distribuicao.hor_00` até
-`distribuicao.hor_23`. Nesta base, `restr_emp.restricao` e
-`restr_fil.restricao` contêm uma escala semanal JSON de 24 horas, conforme o
-valor de `configuracao.demanda`. O parser seleciona o dia da semana e soma os
-valores antes do Pandas. As fontes são agregadas separadamente para evitar
-duplicação por colaborador ou dia. Como essas tabelas de restrição não possuem
-data no catálogo atual, a aplicação não multiplica a demanda pela quantidade
-de dias do mês automaticamente. A aplicação também calcula com Pandas:
+O arquivo privado pode conter nomes de tabelas, colunas, relacionamentos e
+regras específicas do banco. Ele está no `.gitignore` e não deve ser adicionado
+ao commit. O exemplo público usa somente identificadores fictícios. Essa
+separação protege o catálogo; referências físicas mantidas em prompts ou em
+outros módulos também precisam ser revisadas para uma anonimização completa.
 
-```text
-deficit_hours = demand_hours - allocation_hours
-coverage_percent = allocation_hours / demand_hours * 100
-```
+O catálogo enviado ao modelo funciona como uma allowlist: a LLM só pode
+selecionar tabelas e colunas cadastradas, e a SQL é validada antes da execução.
+`semantic_mappings` associa termos da pergunta a identificadores autorizados;
+valores de filtros são mantidos separadamente em parâmetros nomeados e não
+precisam ser listados no JSON.
 
-Quando o resultado possui mais de uma medida numérica, o gráfico de barras ou
-linhas apresenta as medidas como séries separadas. Para `demand_hours` igual a
-zero, `coverage_percent` fica nulo.
-
-Medidas podem declarar um parser no catálogo. Nesta base, o SQL retorna o
-valor bruto como `demand_schedule` e a data como `analysis_date`; a aplicação
-interpreta o JSON antes de gerar `demand_hours`. O catálogo também pode manter
-um `example_value` para documentar formatos especiais. Esse exemplo orienta o
-modelo e os testes, mas nunca substitui um valor inválido do banco. Com
-`on_error: "quarantine"`, o registro inválido é isolado e aparece em
-`warnings` no retorno da API.
-
-Os parsers disponíveis são `numeric`, `numeric_text`, `weekly_24h_json` e
-`comma_separated_24h`. Para um banco com outro formato, basta apontar a medida
-para um parser existente; formatos realmente novos exigirão a criação de um
-parser adicional.
+A métrica `generic_analysis` pode combinar componentes e medidas, desde que as
+fontes necessárias estejam explicitamente autorizadas. Medidas podem declarar
+um parser para normalizar números, texto numérico ou JSON. Consulte
+[docs/metric_catalog.md](docs/metric_catalog.md) para o contrato completo,
+regras de privacidade e validação antes do commit.
 
 ## Evolução para análises mais livres
 
@@ -419,16 +346,16 @@ Exemplo de configuração semântica por cliente:
 {
   "client": "cliente_a",
   "concept": "allocation",
-  "table": "distribuicao",
+  "table": "example_table",
   "columns": {
-    "employee_id": ["emp_id", "tipo", "mat_id"],
-    "allocation_date": "dat",
-    "deleted": "deleted"
+    "record_id": "id",
+    "analysis_date": "record_date",
+    "status": "status"
   },
   "allowed_dimensions": [
-    "cost_center",
-    "branch",
-    "workplace"
+    "category",
+    "date",
+    "status"
   ]
 }
 ```

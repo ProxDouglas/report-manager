@@ -1,115 +1,195 @@
 # Catálogo de métricas
 
-O arquivo `src/relatorios_service/resources/metrics.json` é a fonte estruturada
-usada pela aplicação para interpretar perguntas e restringir tabelas, colunas e
-regras de negócio.
+O catálogo é a allowlist semântica usada pela aplicação para interpretar
+perguntas e restringir as tabelas e colunas que podem aparecer na SQL.
 
-Este arquivo deve ser atualizado quando o modelo real do banco for conhecido.
-Os nomes atuais são exemplos:
+## Separação entre exemplo público e catálogo privado
 
-## employee_terminations
+O repositório deve conter somente o arquivo fictício:
 
-- Tabela: `employee_terminations`
-- Regra padrão: contar registros com `termination_type = 'DISMISSAL'`.
-- Dimensões: mês, tipo de desligamento e motivo.
+```text
+src/relatorios_service/resources/metrics.example.json
+```
 
-## medical_leave_events
+O arquivo usado pela aplicação em cada ambiente é criado localmente:
 
-- Tabela: `employee_leaves`
-- Regra padrão: contar registros com `leave_type = 'MEDICAL_CERTIFICATE'`.
-- Dimensões: mês, tipo de afastamento e motivo.
+```text
+src/relatorios_service/resources/metrics.json
+```
 
-## Como cadastrar uma métrica
+`metrics.json` é ignorado por `relatorios-service/.gitignore` porque pode
+conter nomes de tabelas, colunas, relacionamentos e regras internas do banco.
+O arquivo `metrics.example.json` usa apenas nomes e valores fictícios e pode ser
+versionado como documentação do formato.
 
-Adicione um objeto em `metrics.json` contendo:
+### Preparar um ambiente local
 
-- `key`: identificador estável;
-- `label`: nome apresentado ao usuário;
-- `description`: explicação da métrica;
-- `business_rule`: regra de negócio explícita;
-- `tables`: allowlist de tabelas. Cada item possui `description` e `columns`;
-  cada coluna possui uma descrição e pode possuir `example_value` quando o
-  banco armazena o valor em um formato particular;
-- `allowed_dimensions`: dimensões permitidas para agrupamento;
-- `allowed_measures`: medidas semânticas que podem aparecer no resultado;
-- `measures`: definição da origem (`table` ou `tables`), parser, unidade e
-  exemplo de cada medida;
-- `semantic_mappings`: termos usados na pergunta associados à tabela e à
-  coluna física, além do nome e tipo do parâmetro SQL (`text`, `date`,
-  `number` ou `boolean`);
-- `synonyms`: termos que o usuário pode utilizar;
-- `source_mapping`: relação entre conceitos e tabelas de origem.
+A partir de `relatorios-service`, faça uma cópia do exemplo:
 
-Exemplo do formato de uma tabela no catálogo:
+```bash
+cp src/relatorios_service/resources/metrics.example.json \
+  src/relatorios_service/resources/metrics.json
+```
+
+Depois, edite somente a cópia local e substitua os valores fictícios pelas
+informações necessárias do ambiente. No PowerShell, use:
+
+```powershell
+Copy-Item src/relatorios_service/resources/metrics.example.json `
+  src/relatorios_service/resources/metrics.json
+```
+
+Confira se o arquivo está sendo ignorado antes de compartilhar as alterações:
+
+```bash
+git check-ignore -v src/relatorios_service/resources/metrics.json
+git ls-files --error-unmatch src/relatorios_service/resources/metrics.json
+```
+
+O primeiro comando deve mostrar a regra do `.gitignore`. O segundo deve falhar
+quando o arquivo não estiver versionado. O exemplo público, as instruções e as
+alterações do código podem ser enviados normalmente.
+
+Se o arquivo já tiver sido versionado em um clone existente, remova somente a
+cópia do índice, preservando o arquivo local:
+
+```bash
+git rm --cached src/relatorios_service/resources/metrics.json
+```
+
+O `.gitignore` não remove uma cópia que já esteja em commits antigos. Se o
+arquivo real já tiver sido publicado, a remoção do histórico deve ser avaliada
+com a política do repositório antes do compartilhamento.
+
+Esta separação protege o catálogo, mas não anonimiza referências físicas que
+estejam em prompts, validadores ou outros módulos do código. Para ocultar
+completamente o schema, revise esses pontos e mova os mapeamentos específicos
+para a configuração privada antes de publicar o repositório.
+
+## Como criar uma métrica
+
+Comece copiando `metrics.example.json`. Cada item da lista raiz representa uma
+métrica e deve conter:
+
+- `key`: identificador estável usado no plano de análise;
+- `label`: nome amigável exibido ao usuário;
+- `description`: explicação curta do que é medido;
+- `business_rule`: regra de negócio explícita, incluindo filtros obrigatórios;
+- `tables`: allowlist das tabelas que a métrica pode consultar;
+- `allowed_dimensions`: dimensões semânticas permitidas para agrupamento;
+- `allowed_measures`: medidas semânticas permitidas no resultado;
+- `measures`: origem, colunas, parser e unidade de cada medida;
+- `semantic_mappings`: associação entre termos da pergunta e identificadores
+  físicos, com os parâmetros usados nos filtros;
+- `synonyms`: termos alternativos usados pelos usuários;
+- `source_mapping`: relação entre conceitos de negócio e suas fontes.
+
+### Allowlist de tabelas e colunas
+
+Cada entrada de `tables` deve informar a descrição da tabela e o mapa de
+`columns`. Cadastre somente as colunas necessárias para a métrica:
 
 ```json
 "tables": {
-  "empresa": {
-    "description": "Cadastro das empresas.",
+  "example_table": {
+    "description": "Tabela fictícia usada no exemplo.",
     "columns": {
-      "emp_id": {
-        "description": "Código da empresa.",
-        "example_value": "EMP001"
+      "id": {
+        "description": "Identificador do registro.",
+        "example_value": "EXAMPLE-001"
       },
-      "descr": {
-        "description": "Nome da empresa."
+      "record_date": {
+        "description": "Data do registro.",
+        "example_value": "2026-01-15"
       }
     }
   }
 }
 ```
 
-Na métrica `generic_analysis`, `demanda` é a coluna da tabela
-`configuracao`. Ela não deve ser cadastrada como tabela nem aparecer em
-`FROM demanda` ou `JOIN demanda`.
+`example_value` documenta apenas o formato de um valor e deve ser sempre
+fictício. Nunca use nomes de clientes, IDs reais, dados pessoais, credenciais,
+strings de conexão ou amostras copiadas do banco.
 
-## Análise genérica
+As listas legadas `allowed_tables`, `allowed_columns` e `known_columns` são
+derivadas em memória a partir de `tables`; não é necessário repeti-las no
+arquivo.
 
-A métrica `generic_analysis` permite perguntas que não correspondem a uma
-métrica específica. Ela não libera o banco inteiro: a LLM só pode escolher
-tabelas cadastradas em `tables`, e só pode usar as colunas cadastradas dentro
-de cada tabela.
+### Medidas e parsers
 
-O plano gerado também possui o campo `tables`, com as tabelas necessárias para
-a análise. A aplicação consulta a estrutura dessas tabelas e envia para a LLM:
+Uma medida aponta para a tabela e coluna autorizadas e pode definir um parser:
 
-- somente as colunas cadastradas nas tabelas autorizadas;
-- colunas semânticas sugeridas pelo catálogo;
-- chave primária;
-- chaves estrangeiras;
-- tabela referenciada e suas colunas;
-- descrição semântica da tabela.
+```json
+"measures": {
+  "total_amount": {
+    "table": "example_table",
+    "column": "amount",
+    "parser": "numeric",
+    "unit": "currency"
+  }
+}
+```
 
-Os joins não precisam ser cadastrados manualmente. A LLM pode combinar as
-tabelas autorizadas usando as chaves retornadas pela introspecção do banco. O
-SQL final continua sendo validado contra a lista de tabelas selecionadas e as
-colunas cadastradas.
+Os parsers disponíveis são `passthrough`, `numeric`, `numeric_text`,
+`weekly_24h_json` e `comma_separated_24h`. Use somente um parser compatível
+com o formato real retornado pela consulta. Formatos novos exigem código e
+testes no normalizador.
 
-Para adicionar uma tabela ao escopo genérico, inclua-a em `tables`, informe sua
-descrição, cadastre cada coluna em `columns`, adicione os termos necessários em
-`semantic_mappings` e informe sua finalidade.
+### Mapeamentos semânticos e filtros
 
-Os valores dos filtros não são permissões. Por exemplo, `Empresa Teste` não
-precisa ser listado no catálogo. O mapeamento `empresa` para `empresa.descr`
-é validado, e o valor é enviado separadamente em um parâmetro SQL nomeado.
+`semantic_mappings` traduz a linguagem da pergunta para a tabela e coluna
+autorizadas. O valor informado pelo usuário fica separado do catálogo e deve
+ser enviado como parâmetro nomeado:
 
-## Alocação versus demanda em horas
+```json
+"semantic_mappings": {
+  "record_status": {
+    "table": "example_table",
+    "column": "status",
+    "aliases": ["situação", "status"],
+    "parameter": "filter_status",
+    "value_type": "text"
+  }
+}
+```
 
-Comparações de horas usam a métrica `generic_analysis`.
+Não cadastre no JSON uma lista de valores possíveis do banco. A autorização é
+para identificadores estruturais; valores de filtros, datas e IDs são dados da
+pergunta e devem continuar em parâmetros SQL.
 
-- `allocation_hours`: soma de `distribuicao.hor_00` até `hor_23`;
-- `demand_hours`: parser `weekly_24h_json` aplicado ao campo `restricao` de
-  `restr_emp` ou `restr_fil`, conforme `configuracao.demanda`;
-- `deficit_hours`: demanda menos alocação;
-- `coverage_percent`: alocação dividida pela demanda vezes 100.
+## Métrica genérica
 
-O SQL deve retornar `allocation_hours`, `demand_schedule` e `analysis_date`.
-O normalizador interpreta o JSON, escolhe o vetor do dia da semana e produz
-`demand_hours`. O significado de `restricao` como escala semanal é uma regra
-específica deste banco e deve ser revisado se outro banco for conectado. As
-tabelas de restrição não possuem data no catálogo atual; por isso, a demanda
-não deve ser multiplicada pela quantidade de dias do período sem uma regra de
-negócio explícita.
+Uma métrica genérica pode atender perguntas que combinam mais de uma fonte,
+mas não deve liberar o banco inteiro. O modelo só pode escolher tabelas e
+colunas que estejam no bloco `tables`, e a SQL continua sendo validada antes da
+execução.
 
-Markdown é usado para explicar o catálogo. A aplicação usa JSON para conseguir
-validar automaticamente as consultas.
+Ao usar essa modalidade:
+
+1. inclua apenas as tabelas necessárias;
+2. descreva as colunas que o modelo pode conhecer;
+3. cadastre os mapeamentos semânticos relevantes;
+4. defina medidas e dimensões com nomes estáveis;
+5. documente regras de negócio específicas em `business_rule`.
+
+Relacionamentos e chaves podem ser confirmados pela introspecção privada do
+banco durante a execução. Isso não significa que a estrutura inteira deva ser
+copiada para o repositório.
+
+## Validação antes do commit
+
+Valide a sintaxe JSON e o schema do catálogo usando o arquivo privado local:
+
+```bash
+python -m json.tool src/relatorios_service/resources/metrics.json >/dev/null
+uv run python -c "from relatorios_service.metric_catalog import MetricCatalog; MetricCatalog()"
+git diff --check
+```
+
+Confirme também que os arquivos públicos não possuem nomes de tabelas, colunas
+ou valores do ambiente real. O arquivo `metrics.example.json` deve continuar
+sendo suficiente para que outra pessoa entenda o formato sem receber o schema
+do banco.
+
+Markdown documenta o contrato e o processo. O JSON privado é a fonte
+operacional carregada por `MetricCatalog`.

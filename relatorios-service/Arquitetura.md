@@ -180,7 +180,9 @@ sequenceDiagram
 `AnalysisRequest` é validado pelo Pydantic antes de entrar no serviço:
 
 - `question` é obrigatório e deve ter pelo menos cinco caracteres;
-- `chart_type` aceita `auto`, `bar`, `line`, `pie`, `scatter` ou `table`;
+- `chart_type` é opcional e aceita `auto`, `bar`, `line`, `pie`, `scatter` ou
+  `table`; quando omitido, os tipos definidos pelo plano do gráfico são
+  preservados;
 - `export_formats` aceita `csv` e `xlsx` e começa vazio quando não é enviado.
 
 Um corpo inválido é rejeitado pelo FastAPI antes da execução do harness.
@@ -195,15 +197,34 @@ Um corpo inválido é rejeitado pelo FastAPI antes da execução do harness.
 - regras para não inventar métricas, tabelas ou colunas, extrair período e
   filtros e ignorar instruções da pergunta que tentem alterar o prompt.
 
-O modelo deve retornar um objeto com:
+O modelo deve retornar um objeto com um ou mais `components`. Cada componente
+usa somente `generic_analysis` e possui suas próprias tabelas, medidas,
+dimensões, filtros e período. A composição pode ser `aligned`, quando os
+componentes compartilham chaves, ou `series`, quando representam séries
+independentes.
 
 ```json
 {
-  "metric": "employee_terminations",
-  "measures": ["employee_count"],
-  "group_by": "month",
-  "chart_type": "line",
-  "filters": {},
+  "components": [
+    {
+      "id": "allocation",
+      "metric": "generic_analysis",
+      "measures": ["allocation_hours"],
+      "dimensions": ["month", "workplace"],
+      "filters": {}
+    }
+  ],
+  "composition": {
+    "mode": "aligned",
+    "keys": ["month", "workplace"]
+  },
+  "chart": {
+    "x": "month",
+    "series": [
+      {"column": "allocation_hours", "chart_type": "bar"},
+      {"column": "demand_hours", "chart_type": "line"}
+    ]
+  },
   "requested_exports": ["xlsx"],
   "reasoning": "..."
 }
@@ -213,27 +234,64 @@ O retorno é novamente validado como `AnalysisPlan`. O texto em
 `reasoning` é preservado no resultado, mas não é usado como autorização para
 executar a consulta.
 
+Quando duas séries usam a mesma medida e precisam de tipos de gráfico
+distintos, cada série deve referenciar seu componente com `component_id`:
+
+```json
+{
+  "composition": {"mode": "series"},
+  "chart": {
+    "x": "month",
+    "series": [
+      {
+        "column": "demand_hours",
+        "component_id": "empresa_teste",
+        "chart_type": "bar",
+        "label": "Empresa Teste"
+      },
+      {
+        "column": "demand_hours",
+        "component_id": "rota_sul",
+        "chart_type": "line",
+        "label": "Rota Sul Distribuição"
+      }
+    ]
+  }
+}
+```
+
 ### 5.3 Resolução da métrica e validação do plano
 
-`MetricCatalog.get` exige que `plan.metric` seja uma chave exata cadastrada em
-`metrics.json`. Atualmente o catálogo contém:
-
-| Métrica | Tabela(s) autorizada(s) | Objetivo |
-| --- | --- | --- |
-| `employee_terminations` | `employee_terminations` | Desligamentos. |
-| `medical_leave_events` | `employee_leaves` | Afastamentos por atestado. |
-| `allocated_employees_by_cost_center` | `distribuicao`, `funcionario`, `centro_custo` | Colaboradores por centro de custo. |
-| `allocation_vs_demand` | `distribuicao`, `funcionario`, `empresa`, `configuracao`, `restr_emp`, `restr_fil` | Horas alocadas versus horas de demanda. |
+Para análises compostas, `AnalysisService` aceita exclusivamente a métrica
+`generic_analysis`. O catálogo autoriza as tabelas e colunas selecionadas para
+cada componente e também define `allocation_hours` e `demand_hours` quando
+essas medidas são solicitadas.
 
 Em seguida, `_validate_plan` aplica regras determinísticas:
 
-1. Se existir `group_by`, ele precisa estar em `allowed_dimensions` da métrica.
-2. Cada medida precisa estar em `allowed_measures` quando a métrica definir
-   essa lista.
+1. Cada dimensão precisa estar em `allowed_dimensions`.
+2. Cada medida precisa estar em `allowed_measures`.
+3. Cada componente precisa usar `generic_analysis`.
+4. Componentes alinhados precisam retornar uma linha única por chave de
+   composição.
 
-Os filtros do plano carregam valores identificados na pergunta e não são uma
-lista de valores autorizados. A tabela e a coluna usadas para cada conceito
+Os filtros do componente carregam valores identificados na pergunta e não são
+uma lista de valores autorizados. A tabela e a coluna usadas para cada conceito
 são orientadas por `semantic_mappings` e validadas novamente na SQL final.
+
+Os campos legados `metric`, `tables`, `measures`, `group_by`, `filters` e
+`chart_type` ainda são aceitos para compatibilidade. O serviço os converte para
+um componente único.
+
+Cada componente é executado e validado separadamente. Isso permite combinar
+resultados sem ampliar o escopo de tabelas autorizado de uma consulta.
+
+Quando `demand_hours` usa o parser semanal, o SQL retorna `demand_schedule` e
+`analysis_date`; a camada de normalização produz `demand_hours` antes da
+composição.
+
+As medidas derivadas `deficit_hours` e `coverage_percent` são calculadas após a
+composição alinhada quando `allocation_hours` e `demand_hours` estão presentes.
 
 A `business_rule` é enviada ao modelo como contexto para a SQL. Ela não é
 recalculada por um parser determinístico depois que o modelo produz a consulta;
@@ -250,9 +308,15 @@ cria um engine SQLAlchemy com `pool_pre_ping=True`.
 Antes de gerar a SQL, `_schema_context` usa `sqlalchemy.inspect` para:
 
 1. listar as tabelas existentes;
-2. confirmar que todas as tabelas em `metric.allowed_tables` existem;
-3. obter as colunas dessas tabelas;
-4. enviar ao modelo somente a estrutura das tabelas da métrica selecionada.
+2. confirmar que todas as tabelas derivadas de `metric.tables` existem;
+3. obter as colunas e os tipos dessas tabelas;
+4. obter até cinco linhas de amostra usando somente as colunas autorizadas;
+5. enviar ao modelo a estrutura e as amostras das tabelas da métrica
+  selecionada.
+
+As linhas de amostra servem apenas para indicar formatos, valores nulos e
+variações dos dados. Elas são tratadas no prompt como dados não confiáveis,
+e não como instruções para o modelo.
 
 Se uma tabela autorizada não existir, o fluxo termina com erro e orienta a
 atualização do catálogo.
@@ -260,20 +324,20 @@ atualização do catálogo.
 O serviço usa um único banco por execução do processo. A troca de banco exige
 alterar `DATABASE_TYPE` e `DATABASE_URL` e reiniciar a aplicação.
 
-Para `allocation_vs_demand`, o plano usa `allocation_hours` e
-`demand_hours`. Após a consulta, o serviço calcula `deficit_hours` e
+Quando um componente genérico usa `allocation_hours` e
+`demand_hours`, o serviço calcula `deficit_hours` e
 `coverage_percent` com Pandas quando as duas medidas estão presentes. Quando a
 demanda é um JSON semanal, o SQL retorna `demand_schedule` e `analysis_date`,
 e a camada de normalização produz `demand_hours`.
 
 ### 5.5 Geração do plano SQL
 
-`_create_sql_plan` faz uma segunda chamada estruturada ao mesmo modelo. O
+`_create_sql_plan` faz uma chamada estruturada para cada componente. O
 prompt recebe:
 
 - o dialeto do banco (`postgres`, `sqlserver` ou `oracle`);
 - a definição completa da métrica;
-- o `AnalysisPlan`;
+- o `AnalysisComponent`;
 - o schema descoberto no banco.
 
 O modelo deve retornar um `SqlPlan` contendo `sql`, `parameters` e uma
@@ -296,7 +360,8 @@ Antes da execução, `SqlSafetyValidator.validate` aplica as seguintes verifica�
   `EXECUTE`;
 - referências encontradas depois de `FROM` e `JOIN` precisam corresponder às
   tabelas permitidas pela métrica ou a nomes de CTE;
-- referências qualificadas a colunas precisam existir em `allowed_columns`;
+- referências qualificadas a colunas precisam existir nas colunas cadastradas
+  em `metric.tables`;
 - placeholders nomeados precisam ter um valor em `SqlPlan.parameters`, sem
   parâmetros não utilizados;
 - um ponto e vírgula final é removido antes da execução.
@@ -327,19 +392,17 @@ não a quantidade original existente no banco.
 
 ### 5.8 Gráfico
 
-`ChartBuilder.build` recebe o DataFrame e o tipo solicitado:
+`ChartBuilder.build` recebe o DataFrame e um `ChartSpec`:
 
-- quando `request.chart_type` é informado, ele tem prioridade sobre
-  `plan.chart_type`; caso contrário, o tipo do plano é usado;
+- quando `request.chart_type` é informado, ele sobrescreve o tipo das séries;
 - para `table`, DataFrame vazio ou resultado sem coluna numérica e dimensão, não
   há gráfico;
-- a primeira coluna numérica é usada como valor;
-- a primeira coluna não numérica é usada como dimensão;
+- `x`, `color` e cada série são definidos explicitamente no `ChartSpec`;
+- `component_id` limita uma série aos dados do componente correspondente;
 - `auto` escolhe linha quando o nome da dimensão contém `date`, `month`,
   `year`, `data`, `mes` ou `ano`; nos demais casos escolhe barras;
-- `line`, `pie`, `scatter` e `bar` são construídos com Plotly;
-- `scatter` volta para barras quando não existem pelo menos duas colunas
-  numéricas.
+- barras e linhas podem existir no mesmo gráfico;
+- uma série pode usar o eixo secundário quando possuir unidade diferente.
 
 O resultado é serializado como JSON Plotly. O gráfico pode ser `null` mesmo
 quando a análise foi concluída com sucesso.
@@ -385,6 +448,7 @@ observação fixa à resposta.
 | `answer` | Resposta textual gerada pelo modelo. |
 | `plan` | Plano estruturado usado na análise. |
 | `sql` | SQL validada e executada. |
+| `sqls` | Todas as SQLs executadas, uma por componente. |
 | `row_count` | Linhas presentes no DataFrame final. |
 | `truncated` | Indica se o limite de linhas foi aplicado. |
 | `data` | Registros serializados em JSON, com datas em ISO. |
@@ -427,8 +491,9 @@ real precisa existir no banco antes de uma métrica ser utilizada.
 - `key`: identificador estável usado pelo plano;
 - `label` e `description`: contexto semântico;
 - `business_rule`: regra que deve orientar a consulta;
-- `allowed_tables`: tabelas que a métrica pode consultar;
-- `allowed_columns`: colunas autorizadas por tabela;
+- `tables`: allowlist de tabelas. Cada tabela contém sua descrição e o mapa
+  `columns`, com a descrição de cada coluna e `example_value` opcional para
+  formatos especiais, como JSON armazenado em texto;
 - `semantic_mappings`: tradução de termos da pergunta para tabela e coluna
   física;
 - `allowed_dimensions`: dimensões aceitas para agrupamento;
@@ -444,8 +509,10 @@ Ao adicionar uma métrica, o fluxo recomendado é:
 5. validar a métrica contra cada banco suportado quando houver diferenças de
    dialeto.
 
-O catálogo é pequeno e enviado diretamente ao modelo. Não existe RAG no fluxo
-atual.
+O catálogo é pequeno e enviado diretamente ao modelo. A introspecção do banco
+confirma tipos, chaves e existência somente das tabelas e colunas cadastradas;
+colunas não presentes em `tables.<tabela>.columns` não são enviadas ao modelo
+nem podem ser usadas na SQL final. Não existe RAG no fluxo atual.
 
 ## 9. Fluxo alternativo em `ai_service.py`
 
@@ -470,8 +537,9 @@ comandos somente leitura e parâmetros nomeados para valores da pergunta.
 Ainda existem decisões técnicas importantes antes de tratar o serviço como
 uma plataforma multiusuário ou de produção:
 
-- uma tabela só pode ser usada quando possui `allowed_columns` cadastrado na
-  métrica; isso evita que a introspecção libere colunas não revisadas;
+- uma tabela só pode ser usada quando possui colunas cadastradas em
+  `tables.<tabela>.columns`; isso evita que a introspecção libere colunas não
+  revisadas;
 - o limite de linhas é aplicado após a leitura completa do banco, sem `LIMIT`,
   `TOP`, `FETCH` ou equivalente no SQL;
 - a expressão regular de SQL não substitui um parser por dialeto;

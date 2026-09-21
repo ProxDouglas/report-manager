@@ -32,6 +32,18 @@ class MetricCatalog:
     def _validate_metric(self, metric: MetricDefinition) -> None:
         allowed_tables = set(metric.allowed_tables)
 
+        if metric.tables:
+            empty_tables = [
+                table
+                for table, definition in metric.tables.items()
+                if not definition.columns
+            ]
+            if empty_tables:
+                names = ", ".join(sorted(empty_tables))
+                raise ValueError(
+                    f"As tabelas não possuem colunas cadastradas: {names}"
+                )
+
         unknown_column_tables = set(metric.allowed_columns) - allowed_tables
         if unknown_column_tables:
             names = ", ".join(sorted(unknown_column_tables))
@@ -56,18 +68,45 @@ class MetricCatalog:
                     f"autorizada: {mapping.table}.{mapping.column}"
                 )
 
+        for name, measure in metric.measures.items():
+            measure_tables = list(measure.tables)
+            if measure.table:
+                measure_tables.append(measure.table)
+
+            for table in measure_tables:
+                if table not in allowed_tables:
+                    raise ValueError(
+                        f"A medida {name} usa a tabela não autorizada: "
+                        f"{table}"
+                    )
+
+                configured_columns = metric.allowed_columns.get(table, [])
+                measure_columns = list(measure.columns)
+                if measure.column:
+                    measure_columns.append(measure.column)
+
+                unknown_columns = set(measure_columns) - set(
+                    configured_columns
+                )
+                if unknown_columns:
+                    names = ", ".join(sorted(unknown_columns))
+                    raise ValueError(
+                        f"A medida {name} usa colunas não autorizadas em "
+                        f"{table}: {names}"
+                    )
+
     def context(self) -> str:
         definitions = []
 
         for metric in self._metrics.values():
+            tables = self._table_context(metric)
             definitions.append(
                 {
                     "key": metric.key,
                     "label": metric.label,
                     "description": metric.description,
                     "business_rule": metric.business_rule,
-                    "allowed_tables": metric.allowed_tables,
-                    "known_columns": metric.known_columns,
+                    "tables": tables,
                     "allowed_dimensions": metric.allowed_dimensions,
                     "allowed_measures": metric.allowed_measures,
                     "measures": {
@@ -79,10 +118,32 @@ class MetricCatalog:
                         for key, definition in metric.semantic_mappings.items()
                     },
                     "synonyms": metric.synonyms,
-                    "allowed_columns": metric.allowed_columns,
-                    "table_descriptions": metric.table_descriptions,
                     "source_mapping": metric.source_mapping,
                 }
             )
 
         return json.dumps(definitions, ensure_ascii=False, indent=2)
+
+    def _table_context(
+        self,
+        metric: MetricDefinition,
+    ) -> dict[str, dict[str, object]]:
+        if metric.tables:
+            return {
+                table: definition.model_dump(mode="json")
+                for table, definition in metric.tables.items()
+            }
+
+        return {
+            table: {
+                "description": metric.table_descriptions.get(table, ""),
+                "columns": {
+                    column: {
+                        "description": "",
+                        "example_value": None,
+                    }
+                    for column in columns
+                },
+            }
+            for table, columns in metric.allowed_columns.items()
+        }

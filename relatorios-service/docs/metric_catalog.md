@@ -27,9 +27,9 @@ Adicione um objeto em `metrics.json` contendo:
 - `label`: nome apresentado ao usuário;
 - `description`: explicação da métrica;
 - `business_rule`: regra de negócio explícita;
-- `allowed_tables`: tabelas que podem ser consultadas;
-- `known_columns`: vocabulário legado de colunas conhecidas para orientar o
-  modelo; não é uma lista de valores de filtro;
+- `tables`: allowlist de tabelas. Cada item possui `description` e `columns`;
+  cada coluna possui uma descrição e pode possuir `example_value` quando o
+  banco armazena o valor em um formato particular;
 - `allowed_dimensions`: dimensões permitidas para agrupamento;
 - `allowed_measures`: medidas semânticas que podem aparecer no resultado;
 - `measures`: definição da origem (`table` ou `tables`), parser, unidade e
@@ -38,13 +38,28 @@ Adicione um objeto em `metrics.json` contendo:
   coluna física, além do nome e tipo do parâmetro SQL (`text`, `date`,
   `number` ou `boolean`);
 - `synonyms`: termos que o usuário pode utilizar;
-- `allowed_columns`: colunas autorizadas por tabela. Toda tabela usada pela
-  métrica precisa possuir uma lista, que é validada contra os identificadores
-  da SQL final;
-- `table_descriptions`: descrição semântica das tabelas;
 - `source_mapping`: relação entre conceitos e tabelas de origem.
 
-Na métrica `demand_restrictions`, `demanda` é a coluna da tabela
+Exemplo do formato de uma tabela no catálogo:
+
+```json
+"tables": {
+  "empresa": {
+    "description": "Cadastro das empresas.",
+    "columns": {
+      "emp_id": {
+        "description": "Código da empresa.",
+        "example_value": "EMP001"
+      },
+      "descr": {
+        "description": "Nome da empresa."
+      }
+    }
+  }
+}
+```
+
+Na métrica `generic_analysis`, `demanda` é a coluna da tabela
 `configuracao`. Ela não deve ser cadastrada como tabela nem aparecer em
 `FROM demanda` ou `JOIN demanda`.
 
@@ -52,12 +67,13 @@ Na métrica `demand_restrictions`, `demanda` é a coluna da tabela
 
 A métrica `generic_analysis` permite perguntas que não correspondem a uma
 métrica específica. Ela não libera o banco inteiro: a LLM só pode escolher
-tabelas listadas em `allowed_tables`.
+tabelas cadastradas em `tables`, e só pode usar as colunas cadastradas dentro
+de cada tabela.
 
 O plano gerado também possui o campo `tables`, com as tabelas necessárias para
 a análise. A aplicação consulta a estrutura dessas tabelas e envia para a LLM:
 
-- todas as colunas encontradas nas tabelas autorizadas;
+- somente as colunas cadastradas nas tabelas autorizadas;
 - colunas semânticas sugeridas pelo catálogo;
 - chave primária;
 - chaves estrangeiras;
@@ -69,9 +85,9 @@ tabelas autorizadas usando as chaves retornadas pela introspecção do banco. O
 SQL final continua sendo validado contra a lista de tabelas selecionadas e as
 colunas cadastradas.
 
-Para adicionar uma tabela ao escopo genérico, inclua-a em `allowed_tables`,
-descreva suas colunas em `allowed_columns`, adicione os termos necessários em
-`semantic_mappings` e informe sua finalidade em `table_descriptions`.
+Para adicionar uma tabela ao escopo genérico, inclua-a em `tables`, informe sua
+descrição, cadastre cada coluna em `columns`, adicione os termos necessários em
+`semantic_mappings` e informe sua finalidade.
 
 Os valores dos filtros não são permissões. Por exemplo, `Empresa Teste` não
 precisa ser listado no catálogo. O mapeamento `empresa` para `empresa.descr`
@@ -79,7 +95,7 @@ precisa ser listado no catálogo. O mapeamento `empresa` para `empresa.descr`
 
 ## Alocação versus demanda em horas
 
-A métrica `allocation_vs_demand` deve ser usada para comparações de horas.
+Comparações de horas usam a métrica `generic_analysis`.
 
 - `allocation_hours`: soma de `distribuicao.hor_00` até `hor_23`;
 - `demand_hours`: parser `weekly_24h_json` aplicado ao campo `restricao` de

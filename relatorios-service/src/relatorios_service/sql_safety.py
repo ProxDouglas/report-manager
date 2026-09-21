@@ -267,6 +267,12 @@ class SqlSafetyValidator:
         ignored.update(
             self._normalize_identifier(alias) for alias in aliases_from_as
         )
+        ignored.update(
+            self._select_aliases(self._mask_literals(sql))
+        )
+        ignored.update(
+            self._derived_column_aliases(self._mask_literals(sql))
+        )
 
         for token in self._token.finditer(masked_sql):
             value = self._normalize_identifier(token.group(0))
@@ -284,6 +290,45 @@ class SqlSafetyValidator:
                 f"A consulta usa a coluna ou identificador não autorizado: "
                 f"{value}"
             )
+
+    def _select_aliases(self, sql: str) -> set[str]:
+        aliases: set[str] = set()
+        alias_end = (
+            r"(?=\s*(?:,|\bfrom\b|\bwhere\b|\bgroup\b|\border\b|"
+            r"\bhaving\b|\blimit\b|\boffset\b|\bunion\b|$))"
+        )
+
+        patterns = (
+            rf"\bend\s+(?P<alias>{self._identifier}){alias_end}",
+            rf"\)\s+(?P<alias>{self._identifier}){alias_end}",
+            rf"{self._qualified_identifier.pattern}\s+"
+            rf"(?P<alias>{self._identifier}){alias_end}",
+        )
+
+        for pattern in patterns:
+            for match in re.finditer(pattern, sql, re.IGNORECASE):
+                aliases.add(
+                    self._normalize_identifier(match.group("alias"))
+                )
+
+        return aliases
+
+    def _derived_column_aliases(self, sql: str) -> set[str]:
+        aliases: set[str] = set()
+        pattern = (
+            rf"\)\s*(?:as\s+)?{self._identifier}\s*\("
+            rf"(?P<columns>{self._identifier}(?:\s*,\s*"
+            rf"{self._identifier})*)\)"
+        )
+
+        for match in re.finditer(pattern, sql, re.IGNORECASE):
+            columns = match.group("columns").split(",")
+            aliases.update(
+                self._normalize_identifier(column)
+                for column in columns
+            )
+
+        return aliases
 
     def _assert_column_allowed(
         self,

@@ -270,11 +270,13 @@ Exemplo de corpo:
 
 ```json
 {
-  "question": "Analise os afastamentos por atestado em 2025 por mês e gere um Excel",
-  "chart_type": "line",
-  "export_formats": ["xlsx", "csv"]
+  "question": "Compare a demanda mensal das empresas Empresa Teste e Rota Sul Distribuição em 2026",
+  "export_formats": []
 }
 ```
+
+`chart_type` é opcional. Quando não é enviado, o tipo de cada série pode ser
+definido pela pergunta e pelo `ChartSpec` produzido no plano.
 
 O resultado contém um `report_id`, a resposta textual, os dados, o gráfico e os
 links de download dos arquivos gerados:
@@ -297,11 +299,10 @@ src/relatorios_service/resources/metrics.json
 docs/metric_catalog.md
 ```
 
-A métrica `demand_restrictions` usa a coluna `public.configuracao.demanda` para
-identificar a origem da demanda e autoriza as tabelas `restr_emp`, `restr_fil`,
-`restr_ccusto`, `restr_posto` e `restr_subf`. Os valores reais armazenados em
-`configuracao.demanda` devem ser confirmados em cada banco, pois podem variar
-entre clientes.
+A métrica `generic_analysis` concentra as consultas autorizadas deste fluxo e
+permite combinar componentes, dimensões mensais, filtros de empresa e as
+medidas `allocation_hours` e `demand_hours`. A demanda é lida das tabelas de
+restrição autorizadas e normalizada a partir da escala semanal cadastrada.
 
 Nesse modelo, `demanda` é uma coluna de `configuracao`, não uma tabela. Portanto,
 a consulta deve usar `configuracao.demanda` e nunca `FROM demanda` ou
@@ -315,7 +316,9 @@ políticas, manuais e regras espalhadas em documentos.
 Além das métricas específicas, o catálogo possui `generic_analysis`. Ela permite
 que a LLM escolha mais de uma tabela autorizada para responder à pergunta. O
 plano retorna as tabelas escolhidas no campo `tables`, e a aplicação envia para
-o modelo todas as colunas encontradas, colunas semânticas sugeridas, chaves
+o modelo somente as colunas cadastradas no bloco `tables` do catálogo, junto
+com o contexto da tabela, a descrição da coluna e, quando necessário, um
+`example_value` do formato armazenado. A aplicação também envia chaves
 primárias e chaves estrangeiras dessas tabelas. Os joins podem ser montados
 pela LLM a partir dessa estrutura; não é necessário cadastrar cada join
 manualmente.
@@ -328,8 +331,8 @@ plano, a consulta será rejeitada antes de chegar ao banco.
 
 O catálogo separa autorização estrutural de valores informados pelo usuário:
 
-- `allowed_tables` define as tabelas que podem aparecer na consulta;
-- `allowed_columns` define as colunas autorizadas por tabela;
+- `tables` define a allowlist. Cada tabela possui `description` e um mapa
+  `columns` com a descrição e o exemplo opcional de cada coluna;
 - `semantic_mappings` traduz termos da pergunta para identificadores físicos,
   como `empresa` ou `nome da empresa` para `empresa.descr`;
 - valores como `Empresa Teste`, datas e IDs não precisam ser cadastrados como
@@ -339,6 +342,10 @@ Os valores dos filtros são retornados pelo plano SQL em `parameters` e usados
 como parâmetros nomeados pelo SQLAlchemy. Eles não devem ser concatenados na
 consulta. Antes da execução, a aplicação valida as tabelas, as colunas
 qualificadas e os placeholders utilizados pela consulta.
+
+As listas legadas `allowed_tables`, `allowed_columns` e `known_columns` são
+derivadas em memória do bloco `tables` para manter compatibilidade interna;
+elas não precisam ser repetidas no `metrics.json`.
 
 Exemplo de mapeamento:
 
@@ -360,8 +367,8 @@ o SQL deve usar `empresa.descr` e um placeholder como
 
 ### Comparação de alocação e demanda em horas
 
-Perguntas que mencionarem comparação de alocação e demanda em horas podem usar
-a métrica `allocation_vs_demand`. Ela orienta a LLM a retornar as medidas:
+Perguntas que mencionarem comparação de alocação e demanda em horas usam a
+métrica `generic_analysis`. O plano orienta a LLM a retornar as medidas:
 
 ```text
 allocation_hours

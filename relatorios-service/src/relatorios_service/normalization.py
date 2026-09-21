@@ -40,11 +40,22 @@ class DataNormalizer:
         self,
         dataframe: pd.DataFrame,
         metric: MetricDefinition,
+        selected_measures: list[str] | None = None,
+        dimensions: list[str] | None = None,
     ) -> NormalizationResult:
         result = dataframe.copy()
         warnings: list[dict[str, Any]] = []
+        measure_keys = selected_measures
 
-        for measure_key, definition in metric.measures.items():
+        if measure_keys is None:
+            measure_keys = list(metric.measures)
+
+        for measure_key in measure_keys:
+            definition = metric.measures.get(measure_key)
+
+            if definition is None:
+                continue
+
             if definition.parser is DataParser.PASSTHROUGH:
                 continue
 
@@ -52,6 +63,7 @@ class DataNormalizer:
                 result,
                 measure_key,
                 definition,
+                dimensions,
             )
             warnings.extend(measure_warnings)
 
@@ -62,6 +74,7 @@ class DataNormalizer:
         dataframe: pd.DataFrame,
         measure_key: str,
         definition: MeasureDefinition,
+        dimensions: list[str] | None,
     ) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
         raw_column = definition.raw_alias or definition.column
         raw_column = self._find_column(dataframe, raw_column)
@@ -126,6 +139,7 @@ class DataNormalizer:
                 normalized,
                 raw_column,
                 measure_key,
+                dimensions,
             )
 
         return normalized, warnings
@@ -238,14 +252,23 @@ class DataNormalizer:
         dataframe: pd.DataFrame,
         raw_column: str,
         measure_key: str,
+        dimensions: list[str] | None,
     ) -> pd.DataFrame:
         technical_columns = {raw_column, "restr_id"}
-        group_columns = [
-            column
-            for column in dataframe.columns
-            if column not in technical_columns
-            and column not in {measure_key, "allocation_hours"}
-        ]
+
+        if dimensions:
+            group_columns = [
+                column
+                for column in dimensions
+                if column in dataframe.columns
+            ]
+        else:
+            group_columns = [
+                column
+                for column in dataframe.columns
+                if column not in technical_columns
+                and column not in {measure_key, "allocation_hours"}
+            ]
 
         if not group_columns:
             return pd.DataFrame(

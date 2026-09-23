@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     reports_directory: str = "reports"
     max_analysis_rows: int = 10000
+    app_port: int = 8000
 
 
 settings = Settings()

@@ -51,6 +51,7 @@ LLM_MODEL=nome-do-modelo
 OPENAI_BASE_URL=https://api.openai.com/v1
 DATABASE_TYPE=postgres
 DATABASE_URL=postgresql+psycopg://usuario:senha@localhost:5432/banco
+APP_PORT=8000
 ```
 
 `OPENAI_BASE_URL` é opcional. Para usar um provedor compatível com a API da
@@ -151,8 +152,11 @@ Não é necessário ativar `.venv` manualmente para executar os comandos usando 
 Linux ou Windows:
 
 ```text
-uv run uvicorn relatorios_service.main:app --reload
+uv run relatorios-service --reload
 ```
+
+A porta padrão é `8000`. Altere `APP_PORT` no arquivo `.env` para escolher
+outra porta. Para iniciar sem recarregamento automático, remova `--reload`.
 
 ## Instalação com `pip`
 
@@ -223,7 +227,7 @@ O segundo comando instala o pacote local sem reinstalar as dependências. Use ap
 Com o ambiente virtual ativo, Linux ou Windows:
 
 ```text
-python -m uvicorn relatorios_service.main:app --reload
+relatorios-service --reload
 ```
 
 Para sair do ambiente virtual:
@@ -243,7 +247,7 @@ deactivate
 | Caminho dos scripts | `.venv/bin/` | `.venv\\Scripts\\` |
 | Variável temporária `VIRTUAL_ENV` | `unset VIRTUAL_ENV` | `Remove-Item Env:VIRTUAL_ENV` |
 
-Os comandos `uv sync` e `uv run uvicorn ...` funcionam nos dois sistemas. No Windows, o shell recomendado neste documento é o PowerShell.
+Os comandos `uv sync` e `uv run relatorios-service ...` funcionam nos dois sistemas. No Windows, o shell recomendado neste documento é o PowerShell.
 
 ## Acessar e testar a aplicação
 

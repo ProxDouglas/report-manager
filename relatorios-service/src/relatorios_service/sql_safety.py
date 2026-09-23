@@ -9,7 +9,7 @@ class SqlSafetyValidator:
         re.IGNORECASE,
     )
     _table_reference = re.compile(
-        rf"\b(?:from|join)\s+"
+        rf"\b(?:from|join)\s+(?:lateral\s+)?"
         rf"(?P<table>{_identifier}(?:\s*\.\s*{_identifier})?)"
         rf"(?:\s+(?:as\s+)?(?P<alias>{_identifier}))?",
         re.IGNORECASE,
@@ -22,6 +22,12 @@ class SqlSafetyValidator:
     _qualified_identifier = re.compile(
         rf"(?P<qualifier>{_identifier})\s*\.\s*"
         rf"(?P<column>{_identifier})",
+        re.IGNORECASE,
+    )
+    _postgres_parameter_cast = re.compile(
+        r"(?<!:):(?P<name>[A-Za-z_]\w*)::"
+        r"(?P<type>[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*)?"
+        r"(?:\s*\[\])?)",
         re.IGNORECASE,
     )
     _parameter = re.compile(r"(?<!:):(?P<name>[A-Za-z_]\w*)")
@@ -66,6 +72,7 @@ class SqlSafetyValidator:
         "interval",
         "is",
         "join",
+        "lateral",
         "last",
         "left",
         "like",
@@ -97,14 +104,42 @@ class SqlSafetyValidator:
         "with",
         "without",
     }
+    _native_table_functions: dict[str, frozenset[str]] = {
+        "postgres": frozenset(
+            {"generate_series", "pg_catalog.generate_series"}
+        ),
+        "sqlserver": frozenset({"generate_series"}),
+        "oracle": frozenset(),
+    }
+
+    def native_table_functions(
+        self,
+        database: str,
+    ) -> tuple[str, ...]:
+        functions = self._native_table_functions.get(
+            self._database_name(database),
+            frozenset(),
+        )
+        return tuple(
+            sorted(
+                {
+                    function.rsplit(".", 1)[-1]
+                    for function in functions
+                }
+            )
+        )
 
     def validate(
         self,
         sql: str,
         allowed_tables: list[str],
         allowed_columns: dict[str, list[str]] | None = None,
+        database: str | None = None,
     ) -> str:
         normalized = sql.strip()
+
+        if self._database_name(database) == "postgres":
+            normalized = self._normalize_postgres_parameter_casts(normalized)
 
         if not normalized:
             raise ValueError("O modelo não retornou uma consulta SQL.")
@@ -123,12 +158,18 @@ class SqlSafetyValidator:
 
         cte_names = self._cte_names(normalized)
         table_references = list(self._table_reference.finditer(normalized))
-        referenced_tables = {
+        allowed = {self._normalize_identifier(table) for table in allowed_tables}
+        unknown_tables = {
             self._table_name(reference.group("table"))
             for reference in table_references
+            if self._table_name(reference.group("table")) not in allowed
+            and self._table_name(reference.group("table")) not in cte_names
+            and not self._is_allowed_native_table_function(
+                normalized,
+                reference,
+                database,
+            )
         }
-        allowed = {self._normalize_identifier(table) for table in allowed_tables}
-        unknown_tables = referenced_tables - allowed - cte_names
 
         if unknown_tables:
             names = ", ".join(sorted(unknown_tables))
@@ -140,6 +181,7 @@ class SqlSafetyValidator:
                 table_references,
                 cte_names,
                 allowed_columns,
+                database,
             )
 
         return normalized.rstrip(";").strip()
@@ -151,7 +193,7 @@ class SqlSafetyValidator:
         forbidden_values: list[Any] | None = None,
         require_parameter: bool = False,
     ) -> None:
-        parameter_names = self._parameter_names(sql)
+        parameter_names = self.parameter_names(sql)
         configured_names = set(parameters)
 
         if require_parameter and not parameter_names:
@@ -192,6 +234,7 @@ class SqlSafetyValidator:
         table_references: list[re.Match[str]],
         cte_names: set[str],
         allowed_columns: dict[str, list[str]],
+        database: str | None,
     ) -> None:
         normalized_columns = {
             self._normalize_identifier(table): {
@@ -203,6 +246,7 @@ class SqlSafetyValidator:
             sql,
             table_references,
             cte_names,
+            database,
         )
         table_spans = [reference.span() for reference in table_references]
 
@@ -353,6 +397,7 @@ class SqlSafetyValidator:
         sql: str,
         table_references: list[re.Match[str]],
         cte_names: set[str],
+        database: str | None,
     ) -> dict[str, str | None]:
         aliases: dict[str, str | None] = {
             name: name for name in cte_names
@@ -360,6 +405,15 @@ class SqlSafetyValidator:
 
         for reference in table_references:
             table = self._table_name(reference.group("table"))
+
+            if self._is_allowed_native_table_function(
+                sql,
+                reference,
+                database,
+            ):
+                aliases[table] = None
+                continue
+
             aliases[table] = table
 
             alias = reference.group("alias")
@@ -369,7 +423,98 @@ class SqlSafetyValidator:
                     aliases[normalized_alias] = table
 
         aliases.update(self._subquery_aliases(sql))
+        aliases.update(
+            self._native_table_function_aliases(
+                sql,
+                table_references,
+                database,
+            )
+        )
         return aliases
+
+    def _native_table_function_aliases(
+        self,
+        sql: str,
+        table_references: list[re.Match[str]],
+        database: str | None,
+    ) -> dict[str, None]:
+        aliases: dict[str, None] = {}
+
+        for reference in table_references:
+            if not self._is_allowed_native_table_function(
+                sql,
+                reference,
+                database,
+            ):
+                continue
+
+            opening_parenthesis = self._next_opening_parenthesis(
+                sql,
+                reference.end(),
+            )
+            if opening_parenthesis is None:
+                continue
+
+            closing_parenthesis = self._matching_parenthesis(
+                sql,
+                opening_parenthesis,
+            )
+            if closing_parenthesis is None:
+                function_name = self._qualified_name(
+                    reference.group("table")
+                )
+                raise ValueError(
+                    f"A chamada nativa {function_name} possui parenteses "
+                    "desbalanceados."
+                )
+
+            alias_match = re.match(
+                rf"\s*(?:as\s+)?(?P<alias>{self._identifier})",
+                sql[closing_parenthesis + 1 :],
+                re.IGNORECASE,
+            )
+            if not alias_match:
+                continue
+
+            alias = self._normalize_identifier(alias_match.group("alias"))
+            if alias not in self._keywords:
+                aliases[alias] = None
+
+        return aliases
+
+    def _is_allowed_native_table_function(
+        self,
+        sql: str,
+        reference: re.Match[str],
+        database: str | None,
+    ) -> bool:
+        if database is None:
+            return False
+
+        function_name = self._qualified_name(reference.group("table"))
+        allowed_functions = self._native_table_functions.get(
+            self._database_name(database),
+            frozenset(),
+        )
+        if function_name not in allowed_functions:
+            return False
+
+        return self._next_opening_parenthesis(sql, reference.end()) is not None
+
+    def _next_opening_parenthesis(
+        self,
+        sql: str,
+        start: int,
+    ) -> int | None:
+        index = start
+
+        while index < len(sql) and sql[index].isspace():
+            index += 1
+
+        if index >= len(sql) or sql[index] != "(":
+            return None
+
+        return index
 
     def _subquery_aliases(self, sql: str) -> dict[str, None]:
         aliases = {}
@@ -450,12 +595,32 @@ class SqlSafetyValidator:
             for match in self._cte_reference.finditer(sql)
         }
 
-    def _parameter_names(self, sql: str) -> set[str]:
+    def parameter_names(self, sql: str) -> set[str]:
         masked_sql = self._mask_literals(sql)
         return {
             match.group("name")
             for match in self._parameter.finditer(masked_sql)
         }
+
+    def _normalize_postgres_parameter_casts(self, sql: str) -> str:
+        masked_sql = self._mask_literals(sql)
+        matches = list(self._postgres_parameter_cast.finditer(masked_sql))
+
+        if not matches:
+            return sql
+
+        parts: list[str] = []
+        previous_end = 0
+
+        for match in matches:
+            parts.append(sql[previous_end:match.start()])
+            parts.append(
+                f"CAST(:{match.group('name')} AS {match.group('type')})"
+            )
+            previous_end = match.end()
+
+        parts.append(sql[previous_end:])
+        return "".join(parts)
 
     def _qualified_identifier_spans(self, sql: str) -> list[tuple[int, int]]:
         return [
@@ -492,9 +657,21 @@ class SqlSafetyValidator:
             for start, end in spans
         )
 
+    def _database_name(self, database: str | None) -> str:
+        if database is None:
+            return ""
+
+        return str(getattr(database, "value", database)).lower()
+
     def _table_name(self, identifier: str) -> str:
         parts = identifier.split(".")
         return self._normalize_identifier(parts[-1])
+
+    def _qualified_name(self, identifier: str) -> str:
+        return ".".join(
+            self._normalize_identifier(part)
+            for part in identifier.split(".")
+        )
 
     def _normalize_identifier(self, identifier: str) -> str:
         value = identifier.strip().strip('"`[]')

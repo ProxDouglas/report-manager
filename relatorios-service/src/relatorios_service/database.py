@@ -48,7 +48,10 @@ class DatabaseEngineFactory:
             DatabaseType.ORACLE: "SELECT 1 FROM dual",
         }
 
-        with engine.connect() as connection:
-            connection.execute(text(queries[database]))
+        try:
+            with engine.connect() as connection:
+                connection.execute(text(queries[database]))
+        finally:
+            engine.dispose()
 
         return True

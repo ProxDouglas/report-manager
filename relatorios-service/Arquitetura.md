@@ -1,6 +1,6 @@
 # Arquitetura do `relatorios-service`
 
-Este documento descreve a arquitetura implementada no código atual do projeto,
+Este documento descreve a arquitetura em camadas implementada no projeto,
 incluindo o fluxo completo de uma análise e os controles que formam o harness da
 aplicação.
 
@@ -13,12 +13,18 @@ retorna uma resposta textual, os dados, um gráfico e arquivos para download.
 O repositório não possui uma classe ou um módulo chamado `Harness`. Neste
 documento, **harness** significa a camada de orquestração e de proteção que
 coordena o modelo de linguagem, o catálogo de métricas, o banco, o Pandas, o
-Plotly e a exportação de relatórios. Essa camada está concentrada em:
+Plotly e a exportação de relatórios. Essa camada está separada entre:
 
-- `src/relatorios_service/main.py`: entrada HTTP e tradução de erros para
-  respostas da API;
-- `src/relatorios_service/analysis_service.py`: orquestração do caso de uso de
-  análise;
+- `src/relatorios_service/main.py`: composição da aplicação FastAPI e registro
+  dos routers;
+- `src/relatorios_service/controllers/`: entrada HTTP, tradução de erros e
+  entrega de respostas/arquivos;
+- `src/relatorios_service/services/analysis_service.py`: orquestração do caso
+  de uso de análise;
+- `src/relatorios_service/repositories/`: persistência de datasets e acesso
+  SQLAlchemy aos bancos;
+- `src/relatorios_service/common/dependencies.py`: composição e injeção das
+  dependências da aplicação;
 - `src/relatorios_service/metric_catalog.py` e o catálogo local
   `src/relatorios_service/resources/metrics.json`: vocabulário e regras de
   negócio autorizados;
@@ -38,10 +44,15 @@ com `create_react_agent`, mas atualmente não é importado pelo fluxo da API.
 ```mermaid
 flowchart LR
     C[Cliente] --> API[FastAPI<br/>main.py]
-    API --> AS[AnalysisService]
+    API --> CTRL[Controllers]
+    CTRL --> DS[DatasetService]
+    DS --> DR[DatasetRepository<br/>local]
+    DR --> CSV[CSV temporário<br/>datasets/]
+    CTRL --> AS[AnalysisService]
     AS --> CAT[MetricCatalog<br/>metrics.json]
     AS --> LLM[ChatOpenAI<br/>llm.py]
-    AS --> DB[DatabaseEngineFactory<br/>SQLAlchemy]
+    AS --> AR[AnalyticsRepository]
+    AR --> DB[SQLAlchemy<br/>Postgres/SQL Server/Oracle]
     AS --> SAFE[SqlSafetyValidator]
     AS --> DATA[Pandas DataFrame]
     DATA --> CHART[ChartBuilder<br/>Plotly]
@@ -58,12 +69,14 @@ flowchart LR
 
 | Camada | Componentes | Responsabilidade |
 | --- | --- | --- |
-| Entrada HTTP | `main.py` | Publicar endpoints, validar o corpo via Pydantic, converter exceções e entregar arquivos. |
-| Aplicação/orquestração | `AnalysisService` | Executar o pipeline de planejamento, validação, consulta, resposta, gráfico e exportação. |
-| Contratos | `schemas.py` | Definir enums e modelos para requisição, plano, SQL e resultado. |
+| Entrada HTTP | `controllers/` | Publicar endpoints, validar o corpo via Pydantic, converter exceções e entregar arquivos. |
+| Aplicação/orquestração | `services/` | Executar casos de uso de análise e datasets sem depender de objetos HTTP. |
+| Repositórios | `repositories/` | Isolar armazenamento de datasets e operações de consulta/introspecção SQLAlchemy. |
+| Modelos | `models/` | Representar entidades e resultados de infraestrutura independentes de HTTP. |
+| Contratos | `schemas.py` | Definir enums e modelos Pydantic para requisição, plano, SQL e resultado. |
 | Conhecimento de negócio | `MetricCatalog`, `metrics.json` | Restringir as métricas, tabelas, colunas, dimensões e regras conhecidas. |
 | Inteligência artificial | `llm.py` e `ChatOpenAI` | Gerar o plano, a SQL e a resposta textual, sempre dentro dos contratos esperados. |
-| Persistência de dados | `database.py` | Criar o engine SQLAlchemy para PostgreSQL, SQL Server ou Oracle e testar a conexão. |
+| Conexão com bancos | `database.py`, `AnalyticsRepository` | Criar engines e encapsular execução/introspecção SQL para PostgreSQL, SQL Server ou Oracle. |
 | Segurança de SQL | `sql_safety.py` | Aceitar somente uma consulta de leitura e impedir referências a tabelas ou colunas fora do escopo da métrica. |
 | Transformação e visualização | `pandas`, `ChartBuilder` | Ler resultados, limitar o volume retornado e construir o gráfico Plotly. |
 | Saída | `ReportExporter` | Gravar CSV, XLSX, `chart.json` e `chart.html` no diretório de relatórios. |
@@ -83,15 +96,31 @@ relatorios-service/
 └── src/relatorios_service/
     ├── __init__.py
     ├── main.py
-    ├── analysis_service.py
+    ├── common/
+    │   └── dependencies.py
+    ├── controllers/
+    │   ├── analysis_controller.py
+    │   ├── datasets_controller.py
+    │   ├── health_controller.py
+    │   └── reports_controller.py
+    ├── models/
+    │   ├── database.py
+    │   └── dataset.py
+    ├── repositories/
+    │   ├── analytics_repository.py
+    │   └── dataset_repository.py
+    ├── services/
+    │   ├── analysis_service.py
+    │   ├── chart_service.py
+    │   ├── dataset_service.py
+    │   ├── file_reader.py
+    │   ├── normalization.py
+    │   └── report_exporter.py
     ├── ai_service.py
-    ├── chart_service.py
     ├── config.py
     ├── database.py
-    ├── file_reader.py
     ├── llm.py
     ├── metric_catalog.py
-    ├── report_exporter.py
     ├── schemas.py
     ├── sql_safety.py
     └── resources/
@@ -111,17 +140,15 @@ O processo normalmente é iniciado com:
 uv run uvicorn relatorios_service.main:app --reload
 ```
 
-Durante a importação de `main.py`:
+Na importação de `main.py`, `create_app()` monta o `FastAPI`, cria o container
+de dependências e registra os routers. `common/dependencies.py` configura os
+repositories, `FileReader`, `DatasetService` e `AnalysisService`; este último
+carrega o catálogo de métricas, prepara os builders/validadores e cria o objeto
+`ChatOpenAI`. O container também pode ser injetado em `create_app()` nos testes.
 
-1. O `FastAPI` cria a aplicação.
-2. `config.py` instancia `Settings`, carregando `.env` e variáveis de
-   ambiente com codificação UTF-8.
-3. O módulo cria instâncias globais de `FileReader`,
-   `DatabaseEngineFactory` e `AnalysisService`.
-4. A inicialização de `AnalysisService` carrega o catálogo de métricas,
-   prepara os builders/validadores e cria o objeto `ChatOpenAI`.
-5. Nenhuma consulta ao banco é feita nessa fase. O engine é criado somente
-   quando um endpoint precisa acessar o banco.
+Nenhuma consulta ao banco é feita nessa fase. O engine é criado somente quando
+o `AnalyticsRepository` abre uma sessão para uma análise ou teste de conexão, e
+é descartado ao fim da operação.
 
 As variáveis `OPENAI_API_KEY` e `LLM_MODEL` são obrigatórias porque o modelo é
 criado na inicialização. O banco é selecionado por `DATABASE_TYPE` e acessado
@@ -147,7 +174,7 @@ O fluxo abaixo é executado por `AnalysisService.analyze` após o recebimento de
 ```mermaid
 sequenceDiagram
     participant Cliente
-    participant API as FastAPI
+    participant API as FastAPI/Controller
     participant Serviço as AnalysisService
     participant Modelo as ChatOpenAI
     participant Catálogo as MetricCatalog
@@ -463,15 +490,24 @@ observação fixa à resposta.
 | `GET /health` | Verifica somente se a API está viva. | `{"status": "ok"}`. |
 | `GET /database/health` | Cria uma conexão e executa `SELECT 1`; Oracle usa `SELECT 1 FROM dual`. | Banco ativo e `connected`, ou `500`. |
 | `POST /analytics/question` | Executa todo o harness de análise. | JSON de `AnalysisResult`; `400` para `ValueError`; `500` para erros não tratados como validação. |
+| `POST /datasets` | Valida, armazena temporariamente e perfila um CSV. | `dataset_id`, colunas, contagem, prévia; `400` para CSV inválido, `413` para upload acima do limite e `500` para falha de armazenamento. |
 | `POST /files/preview` | Lê CSV, XLSX, XLS ou JSON e retorna as primeiras 20 linhas. | Nome, total, colunas e preview; `400` para formato/conteúdo inválido. |
 | `GET /reports/{report_id}/csv` | Entrega `analysis.csv`. | Arquivo ou `404`. |
 | `GET /reports/{report_id}/xlsx` | Entrega `analysis.xlsx`. | Arquivo ou `404`. |
 | `GET /reports/{report_id}/chart.json` | Entrega o JSON Plotly. | Arquivo ou `404`. |
 | `GET /reports/{report_id}/chart.html` | Entrega o gráfico HTML. | Arquivo ou `404`. |
 
-O endpoint de preview lê o upload inteiro em memória e não persiste o arquivo
-original. O endpoint de análise não recebe arquivos: ele consulta o banco
-configurado.
+O endpoint de preview não persiste o arquivo original. `POST /datasets` mantém
+o CSV por duas horas no repositório local, cujo diretório padrão é `datasets/`;
+uploads são limitados a 25 MiB por padrão, e CSVs a 100.000 linhas e 500
+colunas. A limpeza é feita na inicialização, a cada cinco minutos e antes de
+um novo upload. O CSV original é armazenado sem alteração. Para a prévia, o
+leitor remove espaços externos, normaliza marcadores de nulo, preserva como
+texto colunas identificadoras e converte números, booleanos e datas de formatos
+conhecidos. Valores inválidos em colunas numéricas ou temporais que puderam ser
+identificadas são marcados como nulos na representação normalizada, com
+contagem e amostras no perfil, sem remover suas linhas. O endpoint de análise
+ainda não recebe `dataset_id` e continua consultando o banco configurado.
 
 ## 7. Configuração de banco e drivers
 

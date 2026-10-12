@@ -296,6 +296,49 @@ Quando houver dados suficientes para gerar um gráfico, `chart.json` contém a
 estrutura Plotly e `chart.html` contém uma página HTML autocontida pronta para
 abrir no navegador.
 
+## Enviar CSV
+
+O endpoint `POST /datasets` valida e guarda temporariamente um CSV. Ele retorna
+um `dataset_id`, a quantidade de registros, uma prévia de até 20 linhas e o
+perfil de cada coluna:
+
+```bash
+curl -X POST http://127.0.0.1:8000/datasets \
+  -F "file=@dados.csv"
+```
+
+No momento, o armazenamento padrão é local, no diretório `datasets/`. O código
+acessa esse armazenamento pela interface `DatasetRepository`, cuja
+implementação pode ser substituída por armazenamento em blob ou banco de dados.
+Os arquivos expiram após duas horas; a limpeza local roda na inicialização,
+periodicamente e também durante novos uploads. O tamanho máximo padrão para
+uploads é 25 MiB; CSVs aceitam até 100.000 linhas e 500 colunas.
+
+Os campos `detected_type`, `null_count`, `null_percentage` e `invalid_count`
+ajudam a revisar a inferência antes de usar os dados; `normalized_type` informa
+o tipo efetivamente convertido. O processamento remove espaços ao redor dos
+valores e trata campos vazios, `NULL`, `None`, `N/A`, `N/D` e `NaN` como nulos.
+Não preenche nulos com zero. Colunas com nomes de identificador (como `id`,
+`codigo`, `matricula`, `cpf`, `cnpj` e `cep`) permanecem texto, preservando
+zeros à esquerda. Valores booleanos comuns em português e inglês são
+normalizados; números aceitam decimal com vírgula e agrupamento brasileiro
+quando o CSV usa `;`; datas ISO e `DD/MM/AAAA` são convertidas quando o formato
+é consistente. Os formatos de data aceitos incluem `AAAA-MM-DD`,
+`AAAA-MM-DD HH:MM:SS`, `AAAA-MM-DDTHH:MM:SS`, `AAAA/MM/DD`, `DD/MM/AAAA` e
+`DD-MM-AAAA`.
+
+Quando uma coluna majoritariamente numérica ou de data contém valores
+inválidos, o resultado convertido marca esses valores como nulos e informa
+`invalid_count` e até cinco exemplos com o número do registro. O CSV original
+permanece no repositório temporário, sem alteração, para possibilitar
+reprocessamento. Revise esses avisos antes de usar os dados: registros
+inválidos não são descartados da tabela, mas não participam de agregações
+numéricas ou temporais.
+
+Este endpoint ainda não conecta o CSV a `POST /analytics/question`, que segue
+analisando o banco configurado. A análise em linguagem natural sobre o
+`dataset_id` e a geração de dashboards a partir do CSV são a próxima etapa.
+
 As métricas e suas regras ficam em três arquivos com finalidades diferentes:
 
 ```text

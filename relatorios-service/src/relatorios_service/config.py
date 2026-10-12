@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     reports_directory: str = "reports"
     max_analysis_rows: int = 10000
     app_port: int = 8000
+    datasets_directory: str = "datasets"
+    max_upload_bytes: int = 25 * 1024 * 1024
+    max_dataset_rows: int = 100000
+    max_dataset_columns: int = 500
+    dataset_retention_seconds: int = 7200
 
 
 settings = Settings()

@@ -7,16 +7,18 @@ from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import MetaData, Table, inspect, select, text
-from sqlalchemy.engine import Engine
-
-from relatorios_service.chart_service import ChartBuilder
+from relatorios_service.repositories.analytics_repository import (
+    AnalyticsRepository,
+    AnalyticsSession,
+    SqlAlchemyAnalyticsRepository,
+)
+from relatorios_service.services.chart_service import ChartBuilder
 from relatorios_service.config import settings
-from relatorios_service.database import DatabaseEngineFactory, DatabaseType
+from relatorios_service.database import DatabaseType
 from relatorios_service.llm import create_chat_model
 from relatorios_service.metric_catalog import MetricCatalog
-from relatorios_service.normalization import DataNormalizer
-from relatorios_service.report_exporter import ReportExporter
+from relatorios_service.services.normalization import DataNormalizer
+from relatorios_service.services.report_exporter import ReportExporter
 from relatorios_service.schemas import (
     AnalysisComponent,
     AnalysisPlan,
@@ -46,8 +48,13 @@ class ComponentExecution:
 
 
 class AnalysisService:
-    def __init__(self) -> None:
-        self.database_factory = DatabaseEngineFactory()
+    def __init__(
+        self,
+        analytics_repository: AnalyticsRepository | None = None,
+    ) -> None:
+        self.analytics_repository = (
+            analytics_repository or SqlAlchemyAnalyticsRepository()
+        )
         self.catalog = MetricCatalog()
         self.chart_builder = ChartBuilder()
         self.normalizer = DataNormalizer()
@@ -59,22 +66,18 @@ class AnalysisService:
         plan = self._create_analysis_plan(request)
         plan = self._normalize_plan(plan, request)
 
-        database = self.database_factory.active_database()
-        engine = self.database_factory.create()
         executions: list[ComponentExecution] = []
 
-        try:
+        with self.analytics_repository.open_session() as session:
             for component in plan.components:
                 executions.append(
                     self._run_component(
                         request,
                         component,
-                        database,
-                        engine,
+                        session.database,
+                        session,
                     )
                 )
-        finally:
-            engine.dispose()
 
         dataframe = self._compose_components(executions, plan)
         warnings = self._component_warnings(executions)
@@ -522,12 +525,12 @@ Regras obrigatórias:
         request: AnalysisRequest,
         component: AnalysisComponent,
         database: DatabaseType,
-        engine: Engine,
+        session: AnalyticsSession,
     ) -> ComponentExecution:
         metric = self.catalog.get(component.metric)
         self._validate_plan(component, metric)
         selected_tables = self._selected_tables(component, metric)
-        schema = self._schema_context(engine, metric, selected_tables)
+        schema = self._schema_context(session, metric, selected_tables)
         sql, sql_plan = self._validated_sql_plan(
             request,
             component,
@@ -536,7 +539,7 @@ Regras obrigatórias:
             database,
         )
         dataframe = self._execute_query(
-            engine,
+            session,
             sql,
             sql_plan.parameters,
         )
@@ -837,12 +840,11 @@ Regras obrigatórias:
 
     def _schema_context(
         self,
-        engine: Engine,
+        session: AnalyticsSession,
         metric: MetricDefinition,
         selected_tables: list[str],
     ) -> str:
-        inspector = inspect(engine)
-        available_tables = set(inspector.get_table_names())
+        available_tables = set(session.table_names())
         missing_tables = [
             table
             for table in selected_tables
@@ -870,7 +872,6 @@ Regras obrigatórias:
 
         definitions = []
         for table in selected_tables:
-            database_columns = inspector.get_columns(table)
             configured_columns = metric.allowed_columns.get(table)
             if configured_columns is None:
                 raise ValueError(
@@ -878,14 +879,11 @@ Regras obrigatórias:
                     "no catálogo."
                 )
 
-            database_columns_by_name = {
-                column["name"]: column
-                for column in database_columns
-            }
+            table_schema = session.inspect_table(table, configured_columns)
             missing_columns = [
                 column
                 for column in configured_columns
-                if column not in database_columns_by_name
+                if column not in table_schema.columns
             ]
 
             if missing_columns:
@@ -895,37 +893,13 @@ Regras obrigatórias:
                     f"{names}. Atualize o catálogo."
                 )
 
-            reflected_table = Table(
-                table,
-                MetaData(),
-                autoload_with=engine,
-            )
-            sample_columns = [
-                reflected_table.c[column_name]
-                for column_name in configured_columns
-                if column_name in reflected_table.c
-            ]
-            sample_rows = []
-
-            if sample_columns:
-                sample_query = (
-                    select(*sample_columns)
-                    .select_from(reflected_table)
-                    .limit(5)
-                )
-                with engine.connect() as connection:
-                    sample_rows = [
-                        dict(row._mapping)
-                        for row in connection.execute(sample_query)
-                    ]
+            sample_rows = table_schema.sample_rows
 
             table_definition = metric.tables.get(table)
             column_definitions = {}
             if table_definition:
                 column_definitions = table_definition.columns
 
-            primary_key = inspector.get_pk_constraint(table)
-            foreign_keys = inspector.get_foreign_keys(table)
             definitions.append(
                 {
                     "table": table,
@@ -933,7 +907,7 @@ Regras obrigatórias:
                     "columns": [
                         self._schema_column_context(
                             column_name,
-                            database_columns_by_name,
+                            table_schema.columns,
                             column_definitions,
                         )
                         for column_name in configured_columns
@@ -941,9 +915,7 @@ Regras obrigatórias:
                     "catalog_columns": configured_columns,
                     "catalog_columns_enforced": True,
                     "sample_rows": sample_rows,
-                    "primary_key": primary_key.get(
-                        "constrained_columns", []
-                    ),
+                    "primary_key": table_schema.primary_key,
                     "foreign_keys": [
                         {
                             "columns": foreign_key.get(
@@ -959,7 +931,7 @@ Regras obrigatórias:
                                 "referred_columns", []
                             ),
                         }
-                        for foreign_key in foreign_keys
+                        for foreign_key in table_schema.foreign_keys
                     ],
                 }
             )
@@ -969,13 +941,13 @@ Regras obrigatórias:
     def _schema_column_context(
         self,
         column_name: str,
-        database_columns: dict[str, dict[str, Any]],
+        database_columns: dict[str, str],
         catalog_columns: dict[str, Any],
     ) -> dict[str, Any]:
         definition = catalog_columns.get(column_name)
         context = {
             "name": column_name,
-            "type": str(database_columns[column_name]["type"]),
+            "type": database_columns[column_name],
             "description": "",
         }
 
@@ -1127,12 +1099,11 @@ Regras obrigatórias:
 
     def _execute_query(
         self,
-        engine: Engine,
+        session: AnalyticsSession,
         sql: str,
         parameters: dict[str, Any],
     ) -> pd.DataFrame:
-        with engine.connect() as connection:
-            return pd.read_sql(text(sql), connection, params=parameters)
+        return session.execute_read(sql, parameters)
 
     def _prepare_sql_plan_parameters(
         self,

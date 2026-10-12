@@ -4,8 +4,8 @@ from pathlib import Path
 import pandas as pd
 import plotly.io as plotly_io
 
-from relatorios_service.config import settings
-from relatorios_service.schemas import ExportFormat
+from ..config import settings
+from ..schemas import ExportFormat
 
 
 class ReportExporter:

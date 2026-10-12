@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from relatorios_service.schemas import (
+from ..schemas import (
     DataErrorPolicy,
     DataParser,
     MeasureDefinition,

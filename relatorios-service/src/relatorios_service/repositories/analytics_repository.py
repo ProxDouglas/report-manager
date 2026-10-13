@@ -37,11 +37,8 @@ class AnalyticsRepository(Protocol):
 
 
 class SqlAlchemyAnalyticsRepository:
-    def __init__(
-        self,
-        database_factory: DatabaseEngineFactory | None = None,
-    ) -> None:
-        self.database_factory = database_factory or DatabaseEngineFactory()
+    def __init__(self, database_factory: DatabaseEngineFactory) -> None:
+        self.database_factory = database_factory
 
     def active_database(self) -> DatabaseType:
         return self.database_factory.active_database()

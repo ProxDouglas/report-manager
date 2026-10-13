@@ -1,0 +1,503 @@
+[
+  {
+    "key": "generic_analysis",
+    "label": "Análise genérica das tabelas autorizadas",
+    "description": "Permite analisar perguntas usando somente as tabelas e colunas descritas neste catálogo.",
+    "business_rule": "Interprete somente o pedido do usuário e use as tabelas, colunas e relacionamentos disponíveis na estrutura autorizada. Não invente regras de negócio. Quando a pergunta mencionar colaboradores, preserve a chave composta emp_id, tipo e mat_id. Ignore registros deleted quando isso representar exclusão lógica. Escolha os joins usando as chaves primárias e estrangeiras da estrutura do banco. Para allocation_hours desta aplicação, some distribuicao.hor_00 até distribuicao.hor_23 e, quando necessário, filtre distribuicao.tipo_hor = 'T' para considerar apenas dias trabalhados. Para demand_hours, retorne restricao como demand_schedule e uma data como analysis_date para o parser semanal da aplicação. A demanda padrão usa restr_id = 5 nas tabelas restr_*, com JSON semanal de sete dias e 24 horas por dia. As exceções por data ficam em restr_dem_exc e usam demanda_excecao com uma data ISO e 24 horas; elas só devem ser combinadas quando a consulta tratar explicitamente exceções. Agregue alocação e demanda separadamente antes de relacioná-las.",
+    "tables": {
+      "agendamento": {
+        "description": "Configurações de agendamento e parâmetros de alocação.",
+        "columns": {
+          "agd_id": {"description": "Identificador do agendamento."},
+          "nome": {"description": "Nome do agendamento."},
+          "ativo": {"description": "Indica se o agendamento está ativo."},
+          "periodo_tipo": {"description": "Unidade do período usado pelo solver; aceita dias ou meses.", "example_value": "dias"},
+          "quantidade_dias_solver": {"description": "Quantidade de dias do período do solver.", "example_value": 30},
+          "quantidade_meses_solver": {"description": "Quantidade de meses do período do solver.", "example_value": 1},
+          "dia_inicio_mes_solver": {"description": "Dia do mês usado como início do período mensal.", "example_value": 1},
+          "frequencia_execucao": {"description": "Frequência de execução do agendamento.", "example_value": "diaria"},
+          "frequencia_personalizada": {"description": "Frequência personalizada, quando configurada."},
+          "agrupamento": {"description": "Nível organizacional usado para agrupar a geração.", "example_value": "posto"},
+          "filtros_json": {"description": "Filtros do agendamento armazenados como texto JSON.", "example_value": [{"campo": "posto", "valores": ["10-1||P01"]}]},
+          "alocacao_minima": {"description": "Quantidade mínima de alocação configurada."},
+          "tipo_exec": {"description": "Tipo da execução do agendamento."},
+          "tipo_execucao": {"description": "Modo da execução do solver; pode ser diferença ou total.", "example_value": "diferenca"},
+          "tipo_preferencia": {"description": "Preferência usada na geração; pode ser não, previsto ou proximidade.", "example_value": "nao"},
+          "cron_expressao": {"description": "Expressão cron da execução, quando configurada.", "example_value": "0 8 * * *"},
+          "fuso_horario": {"description": "Fuso horário usado pelo agendamento.", "example_value": "America/Sao_Paulo"},
+          "proxima_execucao_em": {"description": "Data e hora previstas para a próxima execução.", "example_value": "2026-01-02T08:00:00-03:00"},
+          "criado_em": {"description": "Data e hora de criação do agendamento."},
+          "atualizado_em": {"description": "Data e hora da última atualização do agendamento."}
+        }
+      },
+      "ausencia": {
+        "description": "Registros de ausência de colaboradores.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa do colaborador.", "example_value": "EMP001"},
+          "mat_id": {"description": "Matrícula do colaborador."},
+          "tipo": {"description": "Tipo do colaborador."},
+          "dat_ini": {"description": "Data inicial da ausência.", "example_value": "2026-01-01"},
+          "dat_fin": {"description": "Data final da ausência.", "example_value": "2026-01-03"},
+          "tipo_aus": {"description": "Código do tipo de ausência."},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "centro_custo": {
+        "description": "Centros de custo vinculados à empresa e aos colaboradores.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "ccu_id": {"description": "Identificador do centro de custo."},
+          "descr": {"description": "Nome ou descrição do centro de custo.", "example_value": "Centro de custo exemplo"},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "configuracao": {
+        "description": "Configurações do sistema usadas para identificar a origem da demanda.",
+        "columns": {
+          "integ_senior": {"description": "Indica se a integração com o Senior está habilitada.", "example_value": false},
+          "exibe_emp_tip": {"description": "Indica se o tipo do colaborador deve ser exibido.", "example_value": false},
+          "uti_ccusto": {"description": "Indica se a configuração utiliza centro de custo.", "example_value": true},
+          "uti_filial": {"description": "Indica se a configuração utiliza filial.", "example_value": true},
+          "uti_subfnc": {"description": "Indica se a configuração utiliza subfunção.", "example_value": true},
+          "demanda": {"description": "Nível organizacional da demanda; aceita empresa, filial, centro_custo, posto ou subfuncao.", "example_value": "empresa"},
+          "interjornada": {"description": "Quantidade de horas mínimas de intervalo entre jornadas.", "example_value": 11}
+        }
+      },
+      "horario": {
+        "description": "Cadastros de horários usados pelas distribuições e escalas.",
+        "columns": {
+          "hor_id": {"description": "Identificador do horário.", "example_value": "H08"},
+          "descr": {"description": "Descrição do horário.", "example_value": "08:00 às 17:00"},
+          "tipo": {"description": "Tipo do horário.", "example_value": "NORMAL"},
+          "ini_mobili": {"description": "Início da janela móvel em minutos desde meia-noite.", "example_value": 480},
+          "fin_mobili": {"description": "Fim da janela móvel em minutos desde meia-noite.", "example_value": 1020},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "hor_marc": {
+        "description": "Marcações de entrada e saída de cada horário, armazenadas em minutos desde meia-noite.",
+        "columns": {
+          "hor_id": {"description": "Identificador do horário.", "example_value": "H08"},
+          "seq": {"description": "Ordem da marcação dentro do horário.", "example_value": 1},
+          "horario": {"description": "Horário da marcação em minutos desde meia-noite; 480 representa 08:00.", "example_value": 480},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "abrang_hor": {
+        "description": "Vínculos entre postos de trabalho e os horários que podem ser aplicados a eles.",
+        "columns": {
+          "estrut_id": {"description": "Identificador da estrutura do posto."},
+          "posto_id": {"description": "Identificador do posto de trabalho."},
+          "hor_id": {"description": "Identificador do horário permitido."}
+        }
+      },
+      "distribuicao": {
+        "description": "Distribuição diária de colaboradores e horas, com uma coluna para cada hora do dia e referência opcional ao horário cadastrado.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa do colaborador.", "example_value": "EMP001"},
+          "tipo": {"description": "Tipo do colaborador."},
+          "mat_id": {"description": "Matrícula do colaborador."},
+          "dat": {"description": "Data da distribuição.", "example_value": "2026-01-01"},
+          "tipo_exec": {"description": "Origem da distribuição; pode representar alocação ou demanda.", "example_value": "alocacao"},
+          "tipo_hor": {"description": "Código do tipo de horário da distribuição. O código T representa dia trabalhado.", "example_value": "T"},
+          "hor_id": {"description": "Identificador do horário cadastrado aplicado à distribuição.", "example_value": "H08"},
+          "3o_dom": {"description": "Indica se a distribuição corresponde ao terceiro domingo do mês.", "example_value": false},
+          "hor_ent": {"description": "Horário de entrada armazenado em minutos desde meia-noite.", "example_value": 480},
+          "hor_sai": {"description": "Horário de saída armazenado em minutos desde meia-noite.", "example_value": 1020},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false},
+          "hor_00": {"description": "Horas alocadas no intervalo iniciado às 00:00."},
+          "hor_01": {"description": "Horas alocadas no intervalo iniciado às 01:00."},
+          "hor_02": {"description": "Horas alocadas no intervalo iniciado às 02:00."},
+          "hor_03": {"description": "Horas alocadas no intervalo iniciado às 03:00."},
+          "hor_04": {"description": "Horas alocadas no intervalo iniciado às 04:00."},
+          "hor_05": {"description": "Horas alocadas no intervalo iniciado às 05:00."},
+          "hor_06": {"description": "Horas alocadas no intervalo iniciado às 06:00."},
+          "hor_07": {"description": "Horas alocadas no intervalo iniciado às 07:00."},
+          "hor_08": {"description": "Horas alocadas no intervalo iniciado às 08:00."},
+          "hor_09": {"description": "Horas alocadas no intervalo iniciado às 09:00."},
+          "hor_10": {"description": "Horas alocadas no intervalo iniciado às 10:00."},
+          "hor_11": {"description": "Horas alocadas no intervalo iniciado às 11:00."},
+          "hor_12": {"description": "Horas alocadas no intervalo iniciado às 12:00."},
+          "hor_13": {"description": "Horas alocadas no intervalo iniciado às 13:00."},
+          "hor_14": {"description": "Horas alocadas no intervalo iniciado às 14:00."},
+          "hor_15": {"description": "Horas alocadas no intervalo iniciado às 15:00."},
+          "hor_16": {"description": "Horas alocadas no intervalo iniciado às 16:00."},
+          "hor_17": {"description": "Horas alocadas no intervalo iniciado às 17:00."},
+          "hor_18": {"description": "Horas alocadas no intervalo iniciado às 18:00."},
+          "hor_19": {"description": "Horas alocadas no intervalo iniciado às 19:00."},
+          "hor_20": {"description": "Horas alocadas no intervalo iniciado às 20:00."},
+          "hor_21": {"description": "Horas alocadas no intervalo iniciado às 21:00."},
+          "hor_22": {"description": "Horas alocadas no intervalo iniciado às 22:00."},
+          "hor_23": {"description": "Horas alocadas no intervalo iniciado às 23:00."}
+        }
+      },
+      "empresa": {
+        "description": "Cadastro das empresas que identificam o contexto organizacional dos registros.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "descr": {"description": "Nome ou descrição da empresa.", "example_value": "Empresa exemplo"},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "estrutura_posto": {
+        "description": "Estruturas organizacionais às quais os postos pertencem.",
+        "columns": {
+          "cod_estrutura": {"description": "Código da estrutura do posto.", "example_value": "10"},
+          "descricao": {"description": "Descrição da estrutura do posto.", "example_value": "Operação"},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "filial": {
+        "description": "Filiais vinculadas às empresas.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "fil_id": {"description": "Identificador da filial."},
+          "descr": {"description": "Nome ou descrição da filial.", "example_value": "Filial exemplo"},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "funcionario": {
+        "description": "Cadastro de colaboradores e seus vínculos organizacionais.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "tipo": {"description": "Tipo do colaborador."},
+          "mat_id": {"description": "Matrícula do colaborador."},
+          "nome": {"description": "Nome do colaborador.", "example_value": "Colaborador exemplo"},
+          "estrut_id": {"description": "Identificador da estrutura."},
+          "posto_id": {"description": "Identificador do posto de trabalho."},
+          "subf_id": {"description": "Identificador da subfunção."},
+          "fil_id": {"description": "Identificador da filial."},
+          "ccu_id": {"description": "Identificador do centro de custo."},
+          "esc_id": {"description": "Identificador da escala do colaborador."},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "posto": {
+        "description": "Postos de trabalho vinculados às estruturas.",
+        "columns": {
+          "estrut_id": {"description": "Identificador da estrutura."},
+          "posto_id": {"description": "Identificador do posto de trabalho."},
+          "descr": {"description": "Nome ou descrição do posto de trabalho.", "example_value": "Atendente"},
+          "posicao": {"description": "Descrição da posição do posto."},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "restricao": {
+        "description": "Catálogo dos tipos de restrição e do nível organizacional ao qual cada restrição se aplica.",
+        "columns": {
+          "restr_id": {"description": "Identificador da restrição; 5 representa a demanda padrão e 6 a exceção de demanda.", "example_value": 5},
+          "descr": {"description": "Descrição da restrição.", "example_value": "Demanda"},
+          "local": {"description": "Nível da restrição: 1 empresa, 2 filial, 3 centro de custo, 4 posto ou 5 subfunção.", "example_value": 1}
+        }
+      },
+      "restr_emp": {
+        "description": "Restrições de demanda vinculadas à empresa.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "restr_id": {"description": "Identificador da restrição; use 5 para demanda padrão.", "example_value": 5},
+          "restricao": {
+            "description": "Objeto JSON com a chave demanda e uma lista de 24 valores para cada dia da semana.",
+            "example_value": {
+              "demanda": {
+                "domingo": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "segunda": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "terca": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "quarta": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "quinta": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "sexta": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "sabado": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              }
+            }
+          }
+        }
+      },
+      "restr_fil": {
+        "description": "Restrições de demanda vinculadas à filial.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "fil_id": {"description": "Identificador da filial."},
+          "restr_id": {"description": "Identificador da restrição; use 5 para demanda padrão.", "example_value": 5},
+          "restricao": {"description": "Objeto JSON semanal de demanda com 24 posições por dia; possui o mesmo formato de restr_emp.restricao."}
+        }
+      },
+      "restr_ccusto": {
+        "description": "Restrições de demanda vinculadas ao centro de custo.",
+        "columns": {
+          "emp_id": {"description": "Código da empresa.", "example_value": "EMP001"},
+          "ccu_id": {"description": "Identificador do centro de custo."},
+          "restr_id": {"description": "Identificador da restrição; use 5 para demanda padrão.", "example_value": 5},
+          "restricao": {"description": "Objeto JSON semanal de demanda com 24 posições por dia; possui o mesmo formato de restr_emp.restricao."}
+        }
+      },
+      "restr_posto": {
+        "description": "Restrições de demanda vinculadas ao posto de trabalho.",
+        "columns": {
+          "estrut_id": {"description": "Identificador da estrutura."},
+          "posto_id": {"description": "Identificador do posto de trabalho."},
+          "restr_id": {"description": "Identificador da restrição; use 5 para demanda padrão.", "example_value": 5},
+          "restricao": {"description": "Objeto JSON semanal de demanda com 24 posições por dia; possui o mesmo formato de restr_emp.restricao."}
+        }
+      },
+      "restr_subf": {
+        "description": "Restrições de demanda vinculadas à subfunção de um posto.",
+        "columns": {
+          "estrut_id": {"description": "Identificador da estrutura."},
+          "posto_id": {"description": "Identificador do posto de trabalho."},
+          "subf_id": {"description": "Identificador da subfunção."},
+          "restr_id": {"description": "Identificador da restrição; use 5 para demanda padrão.", "example_value": 5},
+          "restricao": {"description": "Objeto JSON semanal de demanda com 24 posições por dia; possui o mesmo formato de restr_emp.restricao."}
+        }
+      },
+      "restr_dem_exc": {
+        "description": "Exceções de demanda para uma unidade e uma data específica.",
+        "columns": {
+          "dem_id": {"description": "Identificador da unidade de demanda, normalmente no formato hierárquico do nível configurado.", "example_value": "1:EMP001"},
+          "dat": {"description": "Data da exceção de demanda.", "example_value": "2026-01-15"},
+          "demanda": {
+            "description": "Texto JSON com a chave demanda_excecao, uma data ISO e uma lista de 24 valores horários.",
+            "example_value": {"demanda_excecao": {"2026-01-15": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}}
+          }
+        }
+      },
+      "subfuncao": {
+        "description": "Subfunções vinculadas aos postos de trabalho.",
+        "columns": {
+          "estrut_id": {"description": "Identificador da estrutura."},
+          "posto_id": {"description": "Identificador do posto de trabalho."},
+          "subf_id": {"description": "Identificador da subfunção."},
+          "descr": {"description": "Nome ou descrição da subfunção.", "example_value": "Atendimento"},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      },
+      "tipo_ausencia": {
+        "description": "Tipos disponíveis para classificar ausências.",
+        "columns": {
+          "cod_aus": {"description": "Código do tipo de ausência."},
+          "descr": {"description": "Descrição do tipo de ausência.", "example_value": "Férias"},
+          "integracao": {"description": "Indica se o registro foi criado ou atualizado por integração.", "example_value": false},
+          "deleted": {"description": "Indica exclusão lógica do registro.", "example_value": false}
+        }
+      }
+    },
+    "allowed_dimensions": [
+      "date",
+      "month",
+      "employee",
+      "company",
+      "comparison_period",
+      "cost_center",
+      "branch",
+      "workplace",
+      "subfunction",
+      "restriction",
+      "demand_type"
+    ],
+    "allowed_measures": [
+      "employee_count",
+      "allocation_hours",
+      "demand_hours",
+      "deficit_hours",
+      "coverage_percent"
+    ],
+    "measures": {
+      "allocation_hours": {
+        "table": "distribuicao",
+        "columns": [
+          "hor_00",
+          "hor_01",
+          "hor_02",
+          "hor_03",
+          "hor_04",
+          "hor_05",
+          "hor_06",
+          "hor_07",
+          "hor_08",
+          "hor_09",
+          "hor_10",
+          "hor_11",
+          "hor_12",
+          "hor_13",
+          "hor_14",
+          "hor_15",
+          "hor_16",
+          "hor_17",
+          "hor_18",
+          "hor_19",
+          "hor_20",
+          "hor_21",
+          "hor_22",
+          "hor_23"
+        ],
+        "parser": "passthrough",
+        "unit": "person_hours"
+      },
+      "demand_hours": {
+        "tables": [
+          "restr_emp",
+          "restr_fil",
+          "restr_ccusto",
+          "restr_posto",
+          "restr_subf"
+        ],
+        "column": "restricao",
+        "parser": "weekly_24h_json",
+        "input_type": "json_text_or_object",
+        "json_path": ["demanda"],
+        "unit": "person_hours",
+        "hours_per_day": 24,
+        "required_days": [
+          "domingo",
+          "segunda",
+          "terca",
+          "quarta",
+          "quinta",
+          "sexta",
+          "sabado"
+        ],
+        "raw_alias": "demand_schedule",
+        "date_alias": "analysis_date",
+        "on_error": "quarantine"
+      }
+    },
+    "semantic_mappings": {
+      "company_name": {
+        "table": "empresa",
+        "column": "descr",
+        "aliases": ["empresa", "nome da empresa", "companhia"],
+        "parameter": "filter_company_name",
+        "description": "Nome da empresa informado pelo usuário."
+      },
+      "company_id": {
+        "table": "empresa",
+        "column": "emp_id",
+        "aliases": ["código da empresa", "codigo da empresa", "id da empresa"],
+        "parameter": "filter_company_id",
+        "description": "Identificador da empresa."
+      },
+      "branch_name": {
+        "table": "filial",
+        "column": "descr",
+        "aliases": ["filial", "nome da filial"],
+        "parameter": "filter_branch_name",
+        "description": "Nome da filial informado pelo usuário."
+      },
+      "branch_id": {
+        "table": "filial",
+        "column": "fil_id",
+        "aliases": ["código da filial", "codigo da filial", "id da filial"],
+        "parameter": "filter_branch_id",
+        "description": "Identificador local da filial; use emp_id junto quando a empresa também estiver disponível."
+      },
+      "cost_center_name": {
+        "table": "centro_custo",
+        "column": "descr",
+        "aliases": ["centro de custo", "nome do centro de custo"],
+        "parameter": "filter_cost_center_name",
+        "description": "Nome do centro de custo informado pelo usuário."
+      },
+      "cost_center_id": {
+        "table": "centro_custo",
+        "column": "ccu_id",
+        "aliases": ["código do centro de custo", "codigo do centro de custo", "id do centro de custo"],
+        "parameter": "filter_cost_center_id",
+        "description": "Identificador do centro de custo; use emp_id junto quando a empresa também estiver disponível."
+      },
+      "workplace_name": {
+        "table": "posto",
+        "column": "descr",
+        "aliases": ["nome do posto", "descrição do posto", "descricao do posto"],
+        "parameter": "filter_workplace_name",
+        "description": "Nome ou descrição do posto de trabalho informado pelo usuário."
+      },
+      "analysis_date": {
+        "table": "distribuicao",
+        "column": "dat",
+        "aliases": ["data", "dia", "data da alocação", "data da alocacao"],
+        "parameter": "filter_analysis_date",
+        "value_type": "date",
+        "description": "Data usada para filtrar ou agrupar a análise."
+      },
+      "period_start": {
+        "table": "distribuicao",
+        "column": "dat",
+        "aliases": ["início", "inicio", "data inicial", "a partir de"],
+        "parameter": "filter_period_start",
+        "value_type": "date",
+        "description": "Início do intervalo analisado."
+      },
+      "period_end": {
+        "table": "distribuicao",
+        "column": "dat",
+        "aliases": ["fim", "data final", "até", "ate"],
+        "parameter": "filter_period_end",
+        "value_type": "date",
+        "description": "Fim exclusivo do intervalo analisado."
+      },
+      "workplace_id": {
+        "table": "funcionario",
+        "column": "posto_id",
+        "aliases": ["posto", "posto de trabalho", "código do posto", "codigo do posto"],
+        "parameter": "filter_workplace_id",
+        "value_type": "text",
+        "description": "Identificador do posto de trabalho."
+      },
+      "subfunction_name": {
+        "table": "subfuncao",
+        "column": "descr",
+        "aliases": ["subfunção", "subfuncao", "nome da subfunção", "nome da subfuncao"],
+        "parameter": "filter_subfunction_name",
+        "description": "Nome ou descrição da subfunção informado pelo usuário."
+      },
+      "demand_type": {
+        "table": "distribuicao",
+        "column": "tipo_exec",
+        "aliases": ["tipo de demanda", "tipo de execução", "tipo de execucao"],
+        "parameter": "filter_demand_type",
+        "description": "Origem da distribuição, como alocacao ou demanda."
+      },
+      "restriction_id": {
+        "table": "restricao",
+        "column": "restr_id",
+        "aliases": ["restrição", "restricao", "código da restrição", "codigo da restricao"],
+        "parameter": "filter_restriction_id",
+        "value_type": "number",
+        "description": "Identificador do tipo de restrição."
+      }
+    },
+    "synonyms": [
+      "análise",
+      "analise",
+      "comparar",
+      "quantos",
+      "quais",
+      "por empresa",
+      "por filial",
+      "por posto",
+      "por centro de custo",
+      "não alocados",
+      "nao alocados"
+    ],
+    "source_mapping": {
+      "allocation_hours": "distribuicao.hor_00 ... distribuicao.hor_23",
+      "demand_hours": "restr_emp.restricao, restr_fil.restricao, restr_ccusto.restricao, restr_posto.restricao ou restr_subf.restricao",
+      "demand_exception": "restr_dem_exc.dem_id, restr_dem_exc.dat e restr_dem_exc.demanda",
+      "schedule": "distribuicao.hor_id -> horario.hor_id -> hor_marc.hor_id",
+      "workplace_schedule_scope": "abrang_hor.estrut_id, abrang_hor.posto_id e abrang_hor.hor_id",
+      "company_name": "empresa.descr",
+      "company_id": "empresa.emp_id",
+      "branch_name": "filial.descr",
+      "cost_center_name": "centro_custo.descr",
+      "workplace_name": "posto.descr",
+      "subfunction_name": "subfuncao.descr"
+    }
+  }
+]

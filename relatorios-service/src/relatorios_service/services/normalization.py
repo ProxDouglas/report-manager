@@ -12,6 +12,7 @@ from ..schemas import (
     MeasureDefinition,
     MetricDefinition,
 )
+from ..domain.measures import ALLOCATION_HOURS
 
 
 WEEKDAY_NAMES = (
@@ -92,6 +93,13 @@ class DataNormalizer:
                 dataframe,
                 definition.date_alias,
             )
+
+            if (
+                date_column is None
+                and dimensions
+                and "date" in dimensions
+            ):
+                date_column = self._find_column(dataframe, "date")
 
             if date_column is None:
                 raise DataNormalizationError(
@@ -267,7 +275,7 @@ class DataNormalizer:
                 column
                 for column in dataframe.columns
                 if column not in technical_columns
-                and column not in {measure_key, "allocation_hours"}
+                and column not in {measure_key, ALLOCATION_HOURS}
             ]
 
         if not group_columns:
@@ -279,8 +287,8 @@ class DataNormalizer:
 
         aggregation = {measure_key: "sum"}
 
-        if "allocation_hours" in dataframe.columns:
-            aggregation["allocation_hours"] = "max"
+        if ALLOCATION_HOURS in dataframe.columns:
+            aggregation[ALLOCATION_HOURS] = "max"
 
         return (
             dataframe.groupby(

@@ -5,6 +5,7 @@
 .env.development*
 reports/
 datasets/
+logs/
 
 # Catálogo local: pode conter nomes de tabelas, colunas e regras do banco.
 src/relatorios_service/resources/metrics.json

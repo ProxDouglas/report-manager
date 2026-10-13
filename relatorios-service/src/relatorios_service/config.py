@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,5 +26,10 @@ class Settings(BaseSettings):
     max_dataset_columns: int = 500
     dataset_retention_seconds: int = 7200
 
+    audit_log_enabled: bool = True
+    audit_log_file: str = "logs/auditoria.txt"
 
-settings = Settings()
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

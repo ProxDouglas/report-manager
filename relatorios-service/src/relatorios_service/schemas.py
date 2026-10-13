@@ -116,13 +116,6 @@ class ChartSpec(BaseModel):
 
 
 class AnalysisPlan(BaseModel):
-    # Campos legados mantidos para compatibilidade com clientes existentes.
-    metric: str = "generic_analysis"
-    tables: list[str] = Field(default_factory=list)
-    measures: list[str] = Field(default_factory=list)
-    group_by: str | None = None
-    chart_type: ChartType = ChartType.AUTO
-    filters: dict[str, Any] = Field(default_factory=dict)
     requested_exports: list[ExportFormat] = Field(default_factory=list)
     reasoning: str = ""
     components: list[AnalysisComponent] = Field(default_factory=list)

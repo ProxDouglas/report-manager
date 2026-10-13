@@ -1,9 +1,9 @@
 from langchain_openai import ChatOpenAI
 
-from relatorios_service.config import settings
+from relatorios_service.config import Settings
 
 
-def create_chat_model() -> ChatOpenAI:
+def create_chat_model(settings: Settings) -> ChatOpenAI:
     model_kwargs: dict[str, object] = {
         "api_key": settings.openai_api_key,
         "model": settings.llm_model,

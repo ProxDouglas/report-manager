@@ -1,0 +1,13 @@
+
+Responda em português do Brasil à pergunta abaixo usando somente o resultado
+calculado. Não invente números e não mostre SQL na resposta final.
+
+Pergunta: {question}
+Plano: {plan_json}
+Resultado: {records_json}
+Observação: {truncation_note}
+Avisos de qualidade dos dados:
+{warnings_json}
+
+Se existirem avisos, informe brevemente que registros inválidos foram
+isolados e não foram usados no cálculo. Não invente os valores ausentes.

@@ -280,7 +280,9 @@ Exemplo de corpo:
 ```
 
 `chart_type` é opcional. Quando não é enviado, o tipo de cada série pode ser
-definido pela pergunta e pelo `ChartSpec` produzido no plano.
+definido pela pergunta e pelo `ChartSpec` produzido no plano. Com `pie`, cada
+série (e cada grupo de cor) vira uma pizza; pizza não pode ser combinada com
+outros tipos de série no mesmo gráfico.
 
 O resultado contém um `report_id`, a resposta textual, os dados, o gráfico e os
 links de download dos arquivos gerados:
@@ -379,6 +381,42 @@ fontes necessárias estejam explicitamente autorizadas. Medidas podem declarar
 um parser para normalizar números, texto numérico ou JSON. Consulte
 [docs/metric_catalog.md](docs/metric_catalog.md) para o contrato completo,
 regras de privacidade e validação antes do commit.
+
+## Logs de auditoria
+
+Cada análise grava eventos em um arquivo texto para acompanhar o processo e
+investigar falhas. Por padrão, o arquivo é `logs/auditoria.txt`, relativo ao
+diretório de onde a aplicação é iniciada. As variáveis `AUDIT_LOG_ENABLED` e
+`AUDIT_LOG_FILE` controlam a gravação; use `AUDIT_LOG_ENABLED=false` para
+desativá-la. O diretório é criado automaticamente, e uma falha ao gravar o
+arquivo é registrada no log da aplicação sem interromper a análise.
+
+Cada linha segue o formato abaixo:
+
+```text
+2026-05-14T10:21:03.512-03:00 | 3f2a9c0e... | sql.validated | {"component": "component_1", "sql": "SELECT ...", "parameters": {...}, "attempts": 1}
+```
+
+Os campos são, nesta ordem: horário com fuso, `report_id` da análise (o mesmo
+retornado por `POST /analytics/question`), nome do evento e payload em JSON.
+Os eventos de uma mesma análise aparecem em ordem:
+
+| Evento | Quando é gravado | Conteúdo principal |
+| --- | --- | --- |
+| `analysis.started` | Ao receber a pergunta | Requisição completa |
+| `plan.created` | Após a LLM gerar e normalizar o plano | Plano |
+| `sql.rejected` | Quando o validador reprova uma SQL (uma linha por tentativa) | SQL, tentativa e motivo |
+| `sql.validated` | Quando uma SQL é aceita | SQL, parâmetros e número de tentativas |
+| `query.executed` | Após executar a consulta de um componente | Componente, linhas e duração em ms |
+| `analysis.composed` | Após combinar os componentes | Linhas, truncamento, avisos e presença de gráfico |
+| `answer.created` | Após gerar a resposta textual | Tamanho da resposta e duração |
+| `analysis.completed` | Ao concluir a análise | Linhas, arquivos exportados e duração |
+| `analysis.failed` | Quando a análise é interrompida por erro | Tipo, mensagem e traceback |
+
+O arquivo contém a pergunta, o plano, o SQL, os valores dos filtros e os
+tracebacks. Ele não contém as linhas de resultado nem o texto da resposta.
+Trate-o como dado sensível: não há mascaramento, rotação ou controle de acesso
+próprio. O diretório `logs/` está no `.gitignore`.
 
 ## Evolução para análises mais livres
 

@@ -4,13 +4,12 @@ from pathlib import Path
 import pandas as pd
 import plotly.io as plotly_io
 
-from ..config import settings
 from ..schemas import ExportFormat
 
 
 class ReportExporter:
-    def __init__(self) -> None:
-        self.base_directory = Path(settings.reports_directory)
+    def __init__(self, reports_directory: str | Path) -> None:
+        self.base_directory = Path(reports_directory)
 
     def export(
         self,

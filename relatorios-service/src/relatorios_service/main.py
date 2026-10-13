@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import lru_cache
 
 from fastapi import FastAPI
 
@@ -61,4 +62,14 @@ def create_app(container: ApplicationContainer | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+@lru_cache(maxsize=1)
+def get_app() -> FastAPI:
+    return create_app()
+
+
+# O app é montado só no primeiro acesso: importar o módulo não lê a configuração.
+def __getattr__(name: str) -> FastAPI:
+    if name == "app":
+        return get_app()
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

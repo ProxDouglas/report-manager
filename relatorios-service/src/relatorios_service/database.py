@@ -3,7 +3,7 @@ from enum import Enum
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from relatorios_service.config import settings
+from relatorios_service.config import Settings
 
 
 class DatabaseType(str, Enum):
@@ -13,19 +13,22 @@ class DatabaseType(str, Enum):
 
 
 class DatabaseEngineFactory:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
     def active_database(self) -> DatabaseType:
         try:
-            return DatabaseType(settings.database_type)
+            return DatabaseType(self.settings.database_type)
         except ValueError as error:
             supported = ", ".join(database.value for database in DatabaseType)
             raise ValueError(
-                f"DATABASE_TYPE inválido: {settings.database_type}. "
+                f"DATABASE_TYPE inválido: {self.settings.database_type}. "
                 f"Valores aceitos: {supported}."
             ) from error
 
     def create(self) -> Engine:
         database = self.active_database()
-        url = settings.database_url
+        url = self.settings.database_url
 
         if not url:
             raise ValueError(

@@ -20,7 +20,12 @@ Plotly e a exportação de relatórios. Essa camada está separada entre:
 - `src/relatorios_service/controllers/`: entrada HTTP, tradução de erros e
   entrega de respostas/arquivos;
 - `src/relatorios_service/services/analysis_service.py`: orquestração do caso
-  de uso de análise;
+  de uso de análise, delegando o planejamento, a geração e validação de SQL, os
+  parâmetros, o contexto do schema, o gráfico e a resposta aos colaboradores de
+  `services/` e às regras de `domain/`;
+- `src/relatorios_service/domain/`: regras puras de período, planejamento,
+  composição, medidas derivadas e validações da métrica, sem depender de LLM,
+  banco ou HTTP;
 - `src/relatorios_service/repositories/`: persistência de datasets e acesso
   SQLAlchemy aos bancos;
 - `src/relatorios_service/common/dependencies.py`: composição e injeção das
@@ -33,11 +38,9 @@ Plotly e a exportação de relatórios. Essa camada está separada entre:
 - `src/relatorios_service/schemas.py`: contratos estruturados usados pela API e
   pelas saídas do modelo.
 
-O fluxo usado pela API é um pipeline controlado por etapas. Embora o projeto
-tenha dependência do LangGraph, o endpoint `/analytics/question` não usa um
-agente ReAct nem um grafo LangGraph: ele chama o modelo em etapas explícitas.
-O módulo `ai_service.py` contém uma implementação alternativa de assistente SQL
-com `create_react_agent`, mas atualmente não é importado pelo fluxo da API.
+O fluxo usado pela API é um pipeline controlado por etapas: o endpoint
+`/analytics/question` chama o modelo em etapas explícitas (planejamento, geração
+de SQL por componente e redação da resposta), sem agente ReAct.
 
 ## 2. Visão geral
 
@@ -60,9 +63,6 @@ flowchart LR
     AS --> RESULT[AnalysisResult]
     RESULT --> API
     API --> DOWNLOAD[Downloads em /reports]
-
-    ALT[SqlAssistant<br/>ai_service.py] -. alternativa não conectada .-> LLM
-    ALT -. usa .-> AGENT[LangGraph ReAct]
 ```
 
 ### Responsabilidades por camada
@@ -71,6 +71,7 @@ flowchart LR
 | --- | --- | --- |
 | Entrada HTTP | `controllers/` | Publicar endpoints, validar o corpo via Pydantic, converter exceções e entregar arquivos. |
 | Aplicação/orquestração | `services/` | Executar casos de uso de análise e datasets sem depender de objetos HTTP. |
+| Domínio | `domain/` | Regras puras de período, planejamento, composição, medidas derivadas e validações da métrica. Não depende de LLM, banco ou HTTP. |
 | Repositórios | `repositories/` | Isolar armazenamento de datasets e operações de consulta/introspecção SQLAlchemy. |
 | Modelos | `models/` | Representar entidades e resultados de infraestrutura independentes de HTTP. |
 | Contratos | `schemas.py` | Definir enums e modelos Pydantic para requisição, plano, SQL e resultado. |
@@ -103,20 +104,36 @@ relatorios-service/
     │   ├── datasets_controller.py
     │   ├── health_controller.py
     │   └── reports_controller.py
+    ├── domain/
+    │   ├── charts.py
+    │   ├── composition.py
+    │   ├── measures.py
+    │   ├── period.py
+    │   ├── planning.py
+    │   └── rules.py
     ├── models/
     │   ├── database.py
     │   └── dataset.py
     ├── repositories/
     │   ├── analytics_repository.py
     │   └── dataset_repository.py
+    ├── prompts/
+    │   ├── __init__.py
+    │   ├── analysis_plan.txt
+    │   ├── answer.txt
+    │   └── sql_plan.txt
     ├── services/
+    │   ├── analysis_planner.py
     │   ├── analysis_service.py
+    │   ├── answer_writer.py
     │   ├── chart_service.py
     │   ├── dataset_service.py
     │   ├── file_reader.py
     │   ├── normalization.py
-    │   └── report_exporter.py
-    ├── ai_service.py
+    │   ├── parameter_binder.py
+    │   ├── report_exporter.py
+    │   ├── schema_context.py
+    │   └── sql_generator.py
     ├── config.py
     ├── database.py
     ├── llm.py
@@ -140,18 +157,21 @@ O processo normalmente é iniciado com:
 uv run uvicorn relatorios_service.main:app --reload
 ```
 
-Na importação de `main.py`, `create_app()` monta o `FastAPI`, cria o container
-de dependências e registra os routers. `common/dependencies.py` configura os
-repositories, `FileReader`, `DatasetService` e `AnalysisService`; este último
-carrega o catálogo de métricas, prepara os builders/validadores e cria o objeto
-`ChatOpenAI`. O container também pode ser injetado em `create_app()` nos testes.
+Importar `main.py` não cria nada: o `app` é montado no primeiro acesso (como faz
+o uvicorn), quando `create_app()` cria o container de dependências e registra os
+routers. `common/dependencies.py` monta os repositories, `FileReader`,
+`DatasetService` e `AnalysisService`. O `AnalysisService` recebe já construídos o
+`ChatOpenAI`, o catálogo de métricas, o exporter e o limite de linhas; os
+builders e validadores sem estado são criados internamente. O container também
+pode ser injetado em `create_app()` nos testes.
 
 Nenhuma consulta ao banco é feita nessa fase. O engine é criado somente quando
 o `AnalyticsRepository` abre uma sessão para uma análise ou teste de conexão, e
 é descartado ao fim da operação.
 
-As variáveis `OPENAI_API_KEY` e `LLM_MODEL` são obrigatórias porque o modelo é
-criado na inicialização. O banco é selecionado por `DATABASE_TYPE` e acessado
+As variáveis `OPENAI_API_KEY` e `LLM_MODEL` são obrigatórias. Elas são lidas por
+`get_settings()` na primeira montagem do container, e não na importação dos
+módulos. O banco é selecionado por `DATABASE_TYPE` e acessado
 por `DATABASE_URL`. A configuração completa está em `.env.example`.
 
 Configurações relevantes:
@@ -165,6 +185,8 @@ Configurações relevantes:
 | `DATABASE_URL` | obrigatória para acesso ao banco | URL SQLAlchemy do banco ativo. |
 | `REPORTS_DIRECTORY` | `reports` | Diretório base dos relatórios gerados. |
 | `MAX_ANALYSIS_ROWS` | `10000` | Limite aplicado ao DataFrame depois da consulta. |
+| `AUDIT_LOG_ENABLED` | `true` | Ativa a gravação dos eventos de auditoria do fluxo de análise. |
+| `AUDIT_LOG_FILE` | `logs/auditoria.txt` | Arquivo texto em que os eventos são acrescentados. O caminho relativo é resolvido a partir do diretório de execução. |
 
 ## 5. Harness ativo: fluxo completo de análise
 
@@ -185,7 +207,7 @@ sequenceDiagram
     API->>Serviço: AnalysisRequest validado
     Serviço->>Modelo: pergunta + catálogo
     Modelo-->>Serviço: AnalysisPlan estruturado
-    Serviço->>Catálogo: resolve(plan.metric)
+    Serviço->>Catálogo: resolve(component.metric)
     Catálogo-->>Serviço: MetricDefinition
     Serviço->>Serviço: valida dimensão e medidas
     Serviço->>Banco: inspeciona tabelas e colunas autorizadas
@@ -217,7 +239,7 @@ Um corpo inválido é rejeitado pelo FastAPI antes da execução do harness.
 
 ### 5.2 Geração do plano de análise
 
-`_create_analysis_plan` envia ao modelo:
+`AnalysisPlanner.create_plan` envia ao modelo:
 
 - o schema JSON de `AnalysisPlan`;
 - o catálogo completo de métricas;
@@ -295,7 +317,7 @@ Para análises compostas, `AnalysisService` aceita exclusivamente a métrica
 cada componente e também define `allocation_hours` e `demand_hours` quando
 essas medidas são solicitadas.
 
-Em seguida, `_validate_plan` aplica regras determinísticas:
+Em seguida, `validate_plan` (em `domain/rules.py`) aplica regras determinísticas:
 
 1. Cada dimensão precisa estar em `allowed_dimensions`.
 2. Cada medida precisa estar em `allowed_measures`.
@@ -307,9 +329,8 @@ Os filtros do componente carregam valores identificados na pergunta e não são
 uma lista de valores autorizados. A tabela e a coluna usadas para cada conceito
 são orientadas por `semantic_mappings` e validadas novamente na SQL final.
 
-Os campos legados `metric`, `tables`, `measures`, `group_by`, `filters` e
-`chart_type` ainda são aceitos para compatibilidade. O serviço os converte para
-um componente único.
+Um plano sem `components` é rejeitado com `ValueError`, que a API responde com
+HTTP 400.
 
 Cada componente é executado e validado separadamente. Isso permite combinar
 resultados sem ampliar o escopo de tabelas autorizado de uma consulta.
@@ -333,7 +354,7 @@ Pandas.
 `DatabaseEngineFactory` converte `DATABASE_TYPE` para o enum `DatabaseType` e
 cria um engine SQLAlchemy com `pool_pre_ping=True`.
 
-Antes de gerar a SQL, `_schema_context` usa `sqlalchemy.inspect` para:
+Antes de gerar a SQL, `build_schema_context` usa `sqlalchemy.inspect` para:
 
 1. listar as tabelas existentes;
 2. confirmar que todas as tabelas derivadas de `metric.tables` existem;
@@ -360,7 +381,7 @@ e a camada de normalização produz `demand_hours`.
 
 ### 5.5 Geração do plano SQL
 
-`_create_sql_plan` faz uma chamada estruturada para cada componente. O
+`SqlGenerator.create_plan` faz uma chamada estruturada para cada componente. O
 prompt recebe:
 
 - o dialeto do banco (`postgres`, `sqlserver` ou `oracle`);
@@ -420,7 +441,7 @@ não a quantidade original existente no banco.
 
 ### 5.8 Gráfico
 
-`ChartBuilder.build` recebe o DataFrame e um `ChartSpec`:
+`plan_chart_spec` (em `domain/charts.py`) monta o `ChartSpec` e `ChartBuilder.build` o renderiza:
 
 - quando `request.chart_type` é informado, ele sobrescreve o tipo das séries;
 - para `table`, DataFrame vazio ou resultado sem coluna numérica e dimensão, não
@@ -430,6 +451,9 @@ não a quantidade original existente no banco.
 - `auto` escolhe linha quando o nome da dimensão contém `date`, `month`,
   `year`, `data`, `mes` ou `ano`; nos demais casos escolhe barras;
 - barras e linhas podem existir no mesmo gráfico;
+- `pie` gera uma pizza por série e por grupo de `color`, lado a lado; pizza não
+  pode ser combinada com outros tipos de série no mesmo gráfico, e essa
+  combinação é rejeitada com erro de validação (HTTP 400);
 - uma série pode usar o eixo secundário quando possuir unidade diferente.
 
 O resultado é serializado como JSON Plotly. O gráfico pode ser `null` mesmo
@@ -455,7 +479,7 @@ Plotly. Os arquivos do gráfico só são criados quando há um gráfico.
 
 ### 5.10 Geração da resposta textual
 
-`_create_answer` faz a terceira chamada ao modelo. O prompt contém somente:
+`AnswerWriter.create_answer` faz a terceira chamada ao modelo. O prompt contém somente:
 
 - a pergunta original;
 - o plano de análise;
@@ -554,23 +578,7 @@ confirma tipos, chaves e existência somente das tabelas e colunas cadastradas;
 colunas não presentes em `tables.<tabela>.columns` não são enviadas ao modelo
 nem podem ser usadas na SQL final. Não existe RAG no fluxo atual.
 
-## 9. Fluxo alternativo em `ai_service.py`
-
-`SqlAssistant` implementa uma segunda estratégia:
-
-1. cria um `SQLDatabase` limitado a `allowed_tables`;
-2. cria um `SQLDatabaseToolkit`;
-3. carrega o prompt `langchain-ai/sql-agent-system-prompt` pelo LangChain Hub;
-4. cria um agente ReAct com `create_react_agent` do LangGraph;
-5. responde a uma pergunta chamando `agent.invoke`.
-
-Essa estratégia não é usada por `main.py` nem por `AnalysisService`. Ela deve
-ser considerada um protótipo/rota alternativa, não parte do contrato atual da
-API. Se for ativada, os mesmos guardrails do fluxo principal precisam ser
-reaplicados, especialmente validação de SQL, controle de colunas, auditoria e
-credenciais somente leitura.
-
-## 10. Segurança e limitações atuais
+## 9. Segurança e limitações atuais
 
 Os controles do fluxo principal incluem tabelas e colunas autorizadas,
 comandos somente leitura e parâmetros nomeados para valores da pergunta.
@@ -587,8 +595,10 @@ uma plataforma multiusuário ou de produção:
   uma role de banco somente leitura;
 - não há autenticação, autorização, isolamento por usuário/tenant, rate limit,
   fila de execução ou timeout de consulta implementados;
-- não há logging estruturado, auditoria das perguntas/SQL ou política de
-  retenção/limpeza do diretório de relatórios;
+- o log de auditoria é um arquivo texto sem rotação, retenção, mascaramento ou
+  controle de acesso próprio. Ele registra perguntas, planos, SQL e valores dos
+  parâmetros, mas não registra as linhas de resultado nem o texto da resposta;
+- não há política de retenção/limpeza do diretório de relatórios;
 - os erros internos podem ser incluídos no campo `detail` das respostas HTTP;
 - o `report_id` gerado pelo fluxo normal é um UUID hexadecimal, mas as rotas de
   download aceitam texto livre e montam o caminho diretamente. A validação do
@@ -597,30 +607,24 @@ uma plataforma multiusuário ou de produção:
 - o modelo recebe dados do resultado para escrever a resposta. Dados sensíveis
   precisam de uma política de minimização, mascaramento ou autorização antes
   de serem enviados ao provedor de LLM.
-- `database_health` cria um engine para o teste de conexão, mas o caminho atual
-  não chama `dispose` explicitamente nesse endpoint; isso deve ser revisado se
-  o health check for chamado em alta frequência.
 
-Não há uma suíte de testes automatizados versionada no diretório atual. O
-comportamento descrito aqui foi obtido da implementação e deve ser coberto por
-testes antes de alterações no catálogo, no validador SQL ou no pipeline de
-produção.
+A suíte em `tests/` roda com `unittest`, sem LLM nem banco reais, e cobre o
+orquestrador, a geração de gráficos, a configuração e os colaboradores do
+pipeline. O comportamento descrito aqui deve continuar coberto por testes antes
+de alterações no catálogo, no validador SQL ou no pipeline de produção.
 
-## 11. Decisões estratégicas em aberto
+## 10. Decisões estratégicas em aberto
 
 As decisões abaixo devem ser respondidas antes de ampliar o harness:
 
-1. O fluxo principal continuará sendo planner + SQL estruturada + validadores
-   determinísticos, ou `SqlAssistant` deverá substituir/compartilhar esse
-   caminho?
-2. A segurança deve exigir role de banco somente leitura e validação por AST,
+1. A segurança deve exigir role de banco somente leitura e validação por AST,
    incluindo colunas, funções, schemas, joins e limites de custo?
-3. O serviço terá usuários/tenants distintos? Em caso afirmativo, como serão
+2. O serviço terá usuários/tenants distintos? Em caso afirmativo, como serão
    aplicados autenticação, autorização, isolamento dos relatórios e retenção
    dos arquivos?
-4. As regras de negócio do catálogo serão apenas instruções para o modelo ou
+3. As regras de negócio do catálogo serão apenas instruções para o modelo ou
    também terão verificações determinísticas por métrica?
-5. O resultado precisa trazer a quantidade total encontrada no banco, além da
+4. O resultado precisa trazer a quantidade total encontrada no banco, além da
    quantidade efetivamente retornada após `MAX_ANALYSIS_ROWS`?
 
 Essas respostas influenciam diretamente a próxima versão dos contratos, do

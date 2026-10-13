@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -13,25 +12,11 @@ from ..schemas import (
     ChartSpec,
     ChartType,
 )
+from relatorios_service.domain.composition import COMPONENT_COLUMN
 
 
 class ChartBuilder:
     def build(
-        self,
-        dataframe: pd.DataFrame,
-        requested_chart: ChartType | ChartSpec,
-        measure_columns: list[str] | None = None,
-    ) -> dict | None:
-        if isinstance(requested_chart, ChartSpec):
-            return self._build_spec(dataframe, requested_chart)
-
-        return self._build_legacy(
-            dataframe,
-            requested_chart,
-            measure_columns,
-        )
-
-    def _build_spec(
         self,
         dataframe: pd.DataFrame,
         chart_spec: ChartSpec,
@@ -58,6 +43,9 @@ class ChartBuilder:
         if not series:
             return None
 
+        if any(item.chart_type is ChartType.PIE for item in series):
+            return self._build_pie(dataframe, chart_spec, series, x_column)
+
         has_secondary_axis = any(
             item.axis is ChartAxis.SECONDARY for item in series
         )
@@ -66,35 +54,20 @@ class ChartBuilder:
         )
 
         for item in series:
-            series_dataframe = self._series_dataframe(dataframe, item)
-            color_column = chart_spec.color
+            chart_type = self._resolve_series_type(item, x_column)
 
-            if item.component_id:
-                color_column = None
-
-            grouped_data = self._group_data(
-                series_dataframe,
-                color_column,
-            )
-            chart_type = self._resolve_series_type(
+            for group_label, group in self._series_groups(
                 dataframe,
+                chart_spec,
                 item,
-                x_column,
-            )
-
-            for group_label, group in grouped_data:
-                trace_name = self._trace_name(item, group_label)
+            ):
                 trace = self._trace(
                     group,
                     x_column,
                     item,
                     chart_type,
-                    trace_name,
+                    self._trace_name(item, group_label),
                 )
-
-                if trace is None:
-                    continue
-
                 figure.add_trace(
                     trace,
                     secondary_y=item.axis is ChartAxis.SECONDARY,
@@ -113,6 +86,64 @@ class ChartBuilder:
 
         return json.loads(figure.to_json())
 
+    def _build_pie(
+        self,
+        dataframe: pd.DataFrame,
+        chart_spec: ChartSpec,
+        series: list[ChartSeries],
+        x_column: str,
+    ) -> dict | None:
+        if any(item.chart_type is not ChartType.PIE for item in series):
+            raise ValueError(
+                "Gráficos de pizza não podem ser combinados com outros tipos "
+                "de série no mesmo gráfico."
+            )
+
+        pies = [
+            go.Pie(
+                labels=group[x_column],
+                values=pd.to_numeric(group[item.column], errors="coerce"),
+                name=self._trace_name(item, group_label),
+            )
+            for item in series
+            for group_label, group in self._series_groups(
+                dataframe,
+                chart_spec,
+                item,
+            )
+        ]
+
+        if not pies:
+            return None
+
+        figure = make_subplots(
+            rows=1,
+            cols=len(pies),
+            specs=[[{"type": "domain"} for _ in pies]],
+            subplot_titles=[pie.name for pie in pies],
+        )
+
+        for column, pie in enumerate(pies, start=1):
+            figure.add_trace(pie, row=1, col=column)
+
+        if chart_spec.title:
+            figure.update_layout(title=chart_spec.title)
+
+        return json.loads(figure.to_json())
+
+    def _series_groups(
+        self,
+        dataframe: pd.DataFrame,
+        chart_spec: ChartSpec,
+        series: ChartSeries,
+    ) -> list[tuple[str | None, pd.DataFrame]]:
+        color_column = None if series.component_id else chart_spec.color
+
+        return self._group_data(
+            self._series_dataframe(dataframe, series),
+            color_column,
+        )
+
     def _series_dataframe(
         self,
         dataframe: pd.DataFrame,
@@ -121,10 +152,10 @@ class ChartBuilder:
         if not series.component_id:
             return dataframe
 
-        component_column = "analysis_component"
+        component_column = COMPONENT_COLUMN
 
         if component_column not in dataframe.columns:
-            return dataframe.iloc[0:0]
+            return dataframe
 
         return dataframe[
             dataframe[component_column].astype(str) == series.component_id
@@ -142,70 +173,6 @@ class ChartBuilder:
             return series.model_copy(update={"chart_type": chart_type})
 
         return series
-
-    def _build_legacy(
-        self,
-        dataframe: pd.DataFrame,
-        requested_type: ChartType,
-        measure_columns: list[str] | None,
-    ) -> dict | None:
-        if dataframe.empty or requested_type is ChartType.TABLE:
-            return None
-
-        numeric_columns = list(
-            dataframe.select_dtypes(include="number").columns
-        )
-        dimension_columns = [
-            column
-            for column in dataframe.columns
-            if column not in numeric_columns
-        ]
-
-        if not numeric_columns or not dimension_columns:
-            return None
-
-        numeric_columns = self._selected_measures(
-            numeric_columns,
-            measure_columns,
-        )
-
-        chart_type = self._resolve_type(
-            dataframe,
-            requested_type,
-            dimension_columns,
-        )
-        dimension = dimension_columns[0]
-
-        if chart_type is ChartType.LINE:
-            figure = px.line(dataframe, x=dimension, y=numeric_columns)
-        elif chart_type is ChartType.PIE:
-            figure = px.pie(
-                dataframe,
-                names=dimension,
-                values=numeric_columns[0],
-            )
-        elif chart_type is ChartType.SCATTER:
-            if len(numeric_columns) < 2:
-                figure = px.bar(
-                    dataframe,
-                    x=dimension,
-                    y=numeric_columns[0],
-                )
-            else:
-                figure = px.scatter(
-                    dataframe,
-                    x=numeric_columns[0],
-                    y=numeric_columns[1],
-                )
-        else:
-            figure = px.bar(
-                dataframe,
-                x=dimension,
-                y=numeric_columns,
-                barmode="group",
-            )
-
-        return json.loads(figure.to_json())
 
     def _default_series(
         self,
@@ -243,18 +210,18 @@ class ChartBuilder:
 
     def _resolve_series_type(
         self,
-        dataframe: pd.DataFrame,
         series: ChartSeries,
         x_column: str,
     ) -> ChartType:
         if series.chart_type is not ChartType.AUTO:
             return series.chart_type
 
-        return self._resolve_type(
-            dataframe,
-            ChartType.AUTO,
-            [x_column],
-        )
+        temporal_names = ("date", "month", "year", "data", "mes", "ano")
+
+        if any(name in x_column.lower() for name in temporal_names):
+            return ChartType.LINE
+
+        return ChartType.BAR
 
     def _trace(
         self,
@@ -263,7 +230,7 @@ class ChartBuilder:
         series: ChartSeries,
         chart_type: ChartType,
         trace_name: str,
-    ) -> go.BaseTraceType | None:
+    ) -> go.BaseTraceType:
         values = pd.to_numeric(dataframe[series.column], errors="coerce")
 
         if chart_type is ChartType.LINE:
@@ -271,13 +238,6 @@ class ChartBuilder:
                 x=dataframe[x_column],
                 y=values,
                 mode="lines+markers",
-                name=trace_name,
-            )
-
-        if chart_type is ChartType.BAR:
-            return go.Bar(
-                x=dataframe[x_column],
-                y=values,
                 name=trace_name,
             )
 
@@ -289,6 +249,7 @@ class ChartBuilder:
                 name=trace_name,
             )
 
+        # AUTO já foi resolvido e PIE é tratado em _build_pie.
         return go.Bar(
             x=dataframe[x_column],
             y=values,
@@ -317,39 +278,3 @@ class ChartBuilder:
                 return column
 
         return None
-
-    def _selected_measures(
-        self,
-        numeric_columns: list[str],
-        measure_columns: list[str] | None,
-    ) -> list[str]:
-        if not measure_columns:
-            return numeric_columns
-
-        selected = [
-            column
-            for column in measure_columns
-            if column in numeric_columns
-        ]
-
-        if selected:
-            return selected
-
-        return numeric_columns
-
-    def _resolve_type(
-        self,
-        dataframe: pd.DataFrame,
-        requested_type: ChartType,
-        dimensions: list[str],
-    ) -> ChartType:
-        if requested_type is not ChartType.AUTO:
-            return requested_type
-
-        first_dimension = dimensions[0].lower()
-        temporal_names = ("date", "month", "year", "data", "mes", "ano")
-
-        if any(name in first_dimension for name in temporal_names):
-            return ChartType.LINE
-
-        return ChartType.BAR

@@ -2,12 +2,20 @@
 
 API de relatórios construída com FastAPI, Python 3.12+ e Uvicorn.
 
+## Idiomas
+
+A interface inicia em inglês e permite alternar entre English e Português no seletor do topo.
+A preferência é salva no navegador. Novos pipelines usam o idioma selecionado nas
+justificativas e limitações da IA; respostas já geradas preservam seu idioma original.
+Os objetivos podem ser escritos em português ou inglês. Na API, `POST /pipelines`
+aceita `language` com `en` (padrão) ou `pt-BR`. Nomes de colunas e identificadores
+técnicos são preservados.
+
 ## Pré-requisitos
 
 - Python 3.12 ou superior;
 - acesso ao terminal;
-- credenciais da OpenAI para as funcionalidades que utilizam LLM;
-- driver ODBC do banco de dados, caso a aplicação utilize SQL Server.
+- credenciais da OpenAI para as funcionalidades que utilizam LLM.
 
 Os comandos abaixo devem ser executados a partir da raiz do projeto, no diretório `relatorios-service`.
 
@@ -49,8 +57,6 @@ Edite o `.env` e informe os valores de acordo com o ambiente:
 OPENAI_API_KEY=sua-chave
 LLM_MODEL=nome-do-modelo
 OPENAI_BASE_URL=https://api.openai.com/v1
-DATABASE_TYPE=postgres
-DATABASE_URL=postgresql+psycopg://usuario:senha@localhost:5432/banco
 APP_PORT=8000
 ```
 
@@ -64,28 +70,7 @@ OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
 Para o DeepSeek, o serviço utiliza o modo JSON compatível com a API do
-provedor nas etapas que geram o plano e o SQL.
-
-A aplicação utiliza um único banco por execução. Escolha o tipo e informe
-somente a URL correspondente:
-
-```env
-# PostgreSQL
-DATABASE_TYPE=postgres
-DATABASE_URL=postgresql+psycopg://usuario:senha@localhost:5432/banco
-
-# SQL Server
-DATABASE_TYPE=sqlserver
-DATABASE_URL=mssql+pyodbc://usuario:senha@servidor:1433/banco?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes
-
-# Oracle
-DATABASE_TYPE=oracle
-DATABASE_URL=oracle+oracledb://usuario:senha@servidor:1521/?service_name=ORCL
-```
-
-Não é necessário configurar as três URLs. Para trocar de banco, altere
-`DATABASE_TYPE` e `DATABASE_URL`, reinicie a aplicação e valide em
-`GET /database/health`.
+provedor na etapa que gera o plano do pipeline.
 
 O arquivo `.env` contém credenciais e não deve ser versionado.
 
@@ -157,6 +142,13 @@ uv run relatorios-service --reload
 
 A porta padrão é `8000`. Altere `APP_PORT` no arquivo `.env` para escolher
 outra porta. Para iniciar sem recarregamento automático, remova `--reload`.
+
+Abra `http://localhost:8000/` para usar a tela de testes dos pipelines: envie
+vários CSVs com um prompt, escolha tratamento separado ou joins e selecione
+execução supervisionada ou autônoma. A tela permite revisar etapas, delegar
+decisões, consultar até 15 linhas e baixar o CSV de cada etapa executada. Também
+é possível corrigir uma etapa concluída, exigindo nova aprovação dela e das
+posteriores. Veja [Pipelines de CSV](docs/data_pipelines.md).
 
 ## Instalação com `pip`
 
@@ -263,41 +255,6 @@ Documentação interativa:
 http://127.0.0.1:8000/docs
 ```
 
-## Análise com texto, gráficos e exportação
-
-O endpoint `POST /analytics/question` interpreta uma pergunta, consulta o
-catálogo de métricas, lê a estrutura autorizada do banco, gera uma consulta
-`SELECT`, valida a consulta, processa o resultado com Pandas e retorna texto,
-dados e um gráfico Plotly.
-
-Exemplo de corpo:
-
-```json
-{
-  "question": "Compare a métrica mensal entre o Grupo Exemplo A e o Grupo Exemplo B em 2026",
-  "export_formats": []
-}
-```
-
-`chart_type` é opcional. Quando não é enviado, o tipo de cada série pode ser
-definido pela pergunta e pelo `ChartSpec` produzido no plano. Com `pie`, cada
-série (e cada grupo de cor) vira uma pizza; pizza não pode ser combinada com
-outros tipos de série no mesmo gráfico.
-
-O resultado contém um `report_id`, a resposta textual, os dados, o gráfico e os
-links de download dos arquivos gerados:
-
-```text
-GET /reports/{report_id}/xlsx
-GET /reports/{report_id}/csv
-GET /reports/{report_id}/chart.json
-GET /reports/{report_id}/chart.html
-```
-
-Quando houver dados suficientes para gerar um gráfico, `chart.json` contém a
-estrutura Plotly e `chart.html` contém uma página HTML autocontida pronta para
-abrir no navegador.
-
 ## Enviar CSV
 
 O endpoint `POST /datasets` valida e guarda temporariamente um CSV. Ele retorna
@@ -337,172 +294,26 @@ reprocessamento. Revise esses avisos antes de usar os dados: registros
 inválidos não são descartados da tabela, mas não participam de agregações
 numéricas ou temporais.
 
-Este endpoint ainda não conecta o CSV a `POST /analytics/question`, que segue
-analisando o banco configurado. A análise em linguagem natural sobre o
-`dataset_id` e a geração de dashboards a partir do CSV são a próxima etapa.
+Para upload múltiplo e tratamento local planejado por LLM, consulte
+[Pipelines de CSV](docs/data_pipelines.md). O fluxo permite tratar arquivos
+separadamente ou gerar um novo dataset por joins, com decisões por etapa ou
+autonomia completa. A LLM recebe somente nomes de colunas e metadados agregados.
 
-As métricas e suas regras ficam em três arquivos com finalidades diferentes:
+## Fontes de dados e processamento
 
-```text
-src/relatorios_service/resources/metrics.json          # local e privado
-src/relatorios_service/resources/metrics.example.json  # exemplo versionado
-docs/metric_catalog.md                                 # instruções
-```
+As operações de ELT são centralizadas nos pipelines: planejamento, transformação,
+joins, agregações, geração de datasets e gráficos das saídas. As entradas atuais
+são arquivos CSV; a prévia de arquivos também aceita os formatos suportados pelo
+`FileReader`.
 
-Antes de iniciar a aplicação em um clone novo, crie o arquivo privado a partir
-do exemplo:
+As conexões diretas com PostgreSQL, SQL Server e Oracle foram removidas, assim
+como os endpoints `/database/health`, `/analytics/question` e `/reports/...`.
+Não é necessário configurar banco externo, drivers ou catálogo de métricas para
+executar a aplicação. Futuros conectores serão fontes de entrada dos pipelines,
+sem um fluxo paralelo de transformação e análise.
 
-```bash
-cp src/relatorios_service/resources/metrics.example.json \
-  src/relatorios_service/resources/metrics.json
-```
-
-No PowerShell:
-
-```powershell
-Copy-Item src/relatorios_service/resources/metrics.example.json `
-  src/relatorios_service/resources/metrics.json
-```
-
-O arquivo privado pode conter nomes de tabelas, colunas, relacionamentos e
-regras específicas do banco. Ele está no `.gitignore` e não deve ser adicionado
-ao commit. O exemplo público usa somente identificadores fictícios. Essa
-separação protege o catálogo; referências físicas mantidas em prompts ou em
-outros módulos também precisam ser revisadas para uma anonimização completa.
-
-O catálogo enviado ao modelo funciona como uma allowlist: a LLM só pode
-selecionar tabelas e colunas cadastradas, e a SQL é validada antes da execução.
-`semantic_mappings` associa termos da pergunta a identificadores autorizados;
-valores de filtros são mantidos separadamente em parâmetros nomeados e não
-precisam ser listados no JSON.
-
-A métrica `generic_analysis` pode combinar componentes e medidas, desde que as
-fontes necessárias estejam explicitamente autorizadas. Medidas podem declarar
-um parser para normalizar números, texto numérico ou JSON. Consulte
-[docs/metric_catalog.md](docs/metric_catalog.md) para o contrato completo,
-regras de privacidade e validação antes do commit.
-
-## Logs de auditoria
-
-Cada análise grava eventos em um arquivo texto para acompanhar o processo e
-investigar falhas. Por padrão, o arquivo é `logs/auditoria.txt`, relativo ao
-diretório de onde a aplicação é iniciada. As variáveis `AUDIT_LOG_ENABLED` e
-`AUDIT_LOG_FILE` controlam a gravação; use `AUDIT_LOG_ENABLED=false` para
-desativá-la. O diretório é criado automaticamente, e uma falha ao gravar o
-arquivo é registrada no log da aplicação sem interromper a análise.
-
-Cada linha segue o formato abaixo:
-
-```text
-2026-05-14T10:21:03.512-03:00 | 3f2a9c0e... | sql.validated | {"component": "component_1", "sql": "SELECT ...", "parameters": {...}, "attempts": 1}
-```
-
-Os campos são, nesta ordem: horário com fuso, `report_id` da análise (o mesmo
-retornado por `POST /analytics/question`), nome do evento e payload em JSON.
-Os eventos de uma mesma análise aparecem em ordem:
-
-| Evento | Quando é gravado | Conteúdo principal |
-| --- | --- | --- |
-| `analysis.started` | Ao receber a pergunta | Requisição completa |
-| `plan.created` | Após a LLM gerar e normalizar o plano | Plano |
-| `sql.rejected` | Quando o validador reprova uma SQL (uma linha por tentativa) | SQL, tentativa e motivo |
-| `sql.validated` | Quando uma SQL é aceita | SQL, parâmetros e número de tentativas |
-| `query.executed` | Após executar a consulta de um componente | Componente, linhas e duração em ms |
-| `analysis.composed` | Após combinar os componentes | Linhas, truncamento, avisos e presença de gráfico |
-| `answer.created` | Após gerar a resposta textual | Tamanho da resposta e duração |
-| `analysis.completed` | Ao concluir a análise | Linhas, arquivos exportados e duração |
-| `analysis.failed` | Quando a análise é interrompida por erro | Tipo, mensagem e traceback |
-
-O arquivo contém a pergunta, o plano, o SQL, os valores dos filtros e os
-tracebacks. Ele não contém as linhas de resultado nem o texto da resposta.
-Trate-o como dado sensível: não há mascaramento, rotação ou controle de acesso
-próprio. O diretório `logs/` está no `.gitignore`.
-
-## Evolução para análises mais livres
-
-A aplicação deve permitir perguntas mais livres sem permitir que a LLM consulte
-qualquer tabela do banco. Cada cliente terá um catálogo semântico próprio, com
-as tabelas, colunas, relacionamentos e regras de negócio autorizados para sua
-conexão.
-
-Exemplo de configuração semântica por cliente:
-
-```json
-{
-  "client": "cliente_a",
-  "concept": "allocation",
-  "table": "example_table",
-  "columns": {
-    "record_id": "id",
-    "analysis_date": "record_date",
-    "status": "status"
-  },
-  "allowed_dimensions": [
-    "category",
-    "date",
-    "status"
-  ]
-}
-```
-
-Outro cliente pode usar tabelas e nomes diferentes, mantendo os mesmos
-conceitos semânticos. O catálogo deve fazer essa tradução semântico-física
-antes da geração do SQL.
-
-As análises planejadas para a evolução do sistema incluem regras genéricas como:
-
-- contar colaboradores distintos;
-- verificar ausência com `NOT EXISTS`;
-- agrupar por centro de custo, filial ou posto;
-- comparar duas métricas;
-- calcular déficit e percentual de cobertura;
-- filtrar por dia, mês ou intervalo.
-
-Exemplos de perguntas que deverão ser suportadas:
-
-```text
-Quais colaboradores não foram alocados no dia 17/09/2026?
-Quantos colaboradores foram alocados por filial?
-Qual posto de trabalho teve menor cobertura?
-Compare demanda e alocação por centro de custo em setembro de 2026.
-```
-
-### Plano de evolução
-
-1. Criar um catálogo semântico por cliente. Inicialmente ele pode ser mantido
-   em JSON; posteriormente deve ser armazenado em tabelas próprias, com
-   versionamento e auditoria.
-2. Ampliar o plano de análise para aceitar mais medidas, dimensões, filtros,
-   comparações e operações além da comparação de alocação e demanda em horas.
-3. Permitir geração de SQL mais livre, limitada às tabelas cadastradas e
-   validada antes da execução.
-
-O fluxo esperado será:
-
-```text
-Cliente autenticado
-    -> catálogo semântico do cliente
-    -> introspecção das tabelas autorizadas
-    -> plano de análise
-    -> SQL somente leitura
-    -> validação de tabelas, comandos e limites
-    -> Pandas, gráfico e exportação
-```
-
-Mesmo com análises mais livres, a aplicação deve manter:
-
-- usuário de banco somente leitura;
-- lista de tabelas autorizadas por cliente;
-- validação de SQL antes da execução;
-- limite de linhas retornadas;
-- limite de tempo de consulta;
-- auditoria da pergunta, plano e SQL executado;
-- proteção de dados sensíveis e controle de acesso por cliente.
-
-RAG não substitui o catálogo semântico. Ele pode ser adicionado posteriormente
-para recuperar políticas, manuais, glossários e regras documentais extensas.
-Para tabelas, colunas e relacionamentos, o catálogo estruturado e a
-introspecção do banco continuam sendo a fonte principal.
+O SQLite local permanece apenas para persistir o estado dos pipelines; os
+arquivos de entrada e saída continuam no repositório local de datasets.
 
 Teste rápido no Linux:
 
@@ -521,14 +332,6 @@ Resposta esperada:
 ```json
 {"status":"ok"}
 ```
-
-## Banco de dados e drivers
-
-O pacote Python `pyodbc` não instala o driver ODBC do banco de dados. Para utilizar SQL Server, instale também o Microsoft ODBC Driver for SQL Server no sistema operacional.
-
-No Linux, o driver deve ser instalado pelo gerenciador de pacotes da distribuição. No Windows, utilize o instalador oficial do Microsoft ODBC Driver e confirme que a arquitetura do driver (x64 ou x86) é compatível com o Python e com a aplicação.
-
-As conexões PostgreSQL e Oracle também dependem de um banco acessível e das credenciais configuradas no `.env`.
 
 ## Comandos úteis
 

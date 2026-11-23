@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -7,6 +8,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from relatorios_service.models.dataset import StoredDataset
+
+
+logger = logging.getLogger(__name__)
 
 
 class DatasetRepository(ABC):
@@ -116,26 +120,32 @@ class LocalDatasetRepository(DatasetRepository):
             ):
                 continue
 
-            metadata_path = dataset_directory / "metadata.json"
-            if not metadata_path.is_file():
-                continue
+            try:
+                metadata_path = dataset_directory / "metadata.json"
+                if not metadata_path.is_file():
+                    continue
 
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            if not isinstance(metadata, dict):
-                raise ValueError(
-                    f"Metadados inválidos para o dataset: "
-                    f"{dataset_directory.name}"
-                )
-            saved_at = metadata.get("saved_at")
-            if not isinstance(saved_at, (int, float)):
-                raise ValueError(
-                    f"Metadados de retenção inválidos: "
-                    f"{dataset_directory.name}"
-                )
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if not isinstance(metadata, dict):
+                    raise ValueError(
+                        f"Metadados inválidos para o dataset: "
+                        f"{dataset_directory.name}"
+                    )
+                saved_at = metadata.get("saved_at")
+                if not isinstance(saved_at, (int, float)):
+                    raise ValueError(
+                        f"Metadados de retenção inválidos: "
+                        f"{dataset_directory.name}"
+                    )
 
-            if now - saved_at >= self.retention_seconds:
-                shutil.rmtree(dataset_directory)
-                removed_count += 1
+                if now - saved_at >= self.retention_seconds:
+                    shutil.rmtree(dataset_directory)
+                    removed_count += 1
+            except (OSError, ValueError):
+                logger.exception(
+                    "Falha ao limpar o dataset %s; continuando a limpeza.",
+                    dataset_directory.name,
+                )
 
         return removed_count
 

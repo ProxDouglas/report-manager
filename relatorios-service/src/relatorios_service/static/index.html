@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Prepare, conecte e revise seus arquivos CSV com execução local e planejamento assistido."
+    />
+    <title>Estúdio de dados · Pipelines CSV</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%230d655c'/%3E%3Cpath d='M10 11h8v8h-8zm12 0h8v8h-8zm-12 12h8v8h-8zm12 0h8v8h-8z' fill='%23fff'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/static/styles.css?v=2" />
+    <script type="module" src="/static/app.js?v=2"></script>
+  </head>
+  <body>
+    <svg
+      class="icon-library"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <symbol id="i-upload" viewBox="0 0 24 24">
+        <path d="M12 16V4m-4 4 4-4 4 4M4 15v5h16v-5" />
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8m-8 4h8" />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24">
+        <path d="M4 12h16m-6-6 6 6-6 6" />
+      </symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24">
+        <path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z" />
+        <path d="m8 12 3 3 5-6" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24">
+        <path d="m5 12 4 4L19 6" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="m6 6 12 12M6 18 18 6" />
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4" />
+      </symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24">
+        <path d="m12 3 3 6 6 3-6 3-3 6-3-6-6-3 6-3 3-6Z" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24">
+        <path d="m12 3 10 5-10 5L2 8l10-5Zm-9 9 9 5 9-5M3 16l9 5 9-5" />
+      </symbol>
+    </svg>
+
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Estúdio de dados, início">
+        <span class="brand-mark" aria-hidden="true"
+          ><i></i><i></i><i></i><i></i
+        ></span>
+        <span>estúdio<span class="brand-light"> de dados</span></span>
+      </a>
+      <div class="topbar-actions">
+        <label for="language" class="visually-hidden">Language / Idioma</label>
+        <select id="language" aria-label="Language / Idioma">
+          <option value="en">English</option>
+          <option value="pt-BR">Português</option>
+        </select>
+        <span class="local-badge"><span></span>Execução local</span>
+        <button type="button" class="button button-quiet" id="new-pipeline">
+          <svg class="icon"><use href="#i-plus" /></svg>Novo pipeline
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <div class="page-intro">
+        <div>
+          <p class="eyebrow">WORKSPACE / PIPELINES CSV</p>
+          <h1>Prepare e conecte seus dados.</h1>
+          <p class="subtitle">
+            Dos arquivos ao resultado, com o controle nas suas mãos.
+          </p>
+        </div>
+        <span class="intro-label"
+          >Você controla o envio.<br /><strong
+            >Amostras apenas com sua permissão.</strong
+          ></span
+        >
+      </div>
+
+      <div id="notice" class="notice" role="alert" hidden></div>
+      <div class="workspace">
+        <section class="panel composer" aria-labelledby="composer-title">
+          <div class="panel-heading">
+            <span class="section-number">01</span>
+            <div>
+              <h2 id="composer-title">Configure seu pipeline</h2>
+              <p>Arquivos, objetivo e nível de autonomia.</p>
+            </div>
+          </div>
+          <form id="pipeline-form">
+            <fieldset id="composer-fields">
+              <div class="field-heading">
+                <label for="csv-files">Arquivos de entrada</label
+                ><span id="file-count">0 arquivos</span>
+              </div>
+              <label class="dropzone" id="dropzone" for="csv-files">
+                <input
+                  id="csv-files"
+                  class="visually-hidden"
+                  type="file"
+                  accept=".csv,text/csv"
+                  multiple
+                />
+                <span class="upload-icon"
+                  ><svg class="icon"><use href="#i-upload" /></svg
+                ></span>
+                <strong>Arraste seus CSVs para cá</strong
+                ><span
+                  >ou
+                  <span class="upload-link">selecione os arquivos</span></span
+                >
+                <small id="upload-limits">Carregando limites de upload…</small>
+              </label>
+              <ul
+                id="file-list"
+                class="file-list"
+                aria-label="Arquivos selecionados"
+              ></ul>
+              <div class="form-section">
+                <label for="prompt">O que você quer fazer?</label>
+                <textarea
+                  id="prompt"
+                  rows="4"
+                  maxlength="4000"
+                  placeholder="Ex.: padronize os formatos, preserve os códigos e relacione os pedidos aos clientes pela coluna cliente_id."
+                ></textarea>
+                <p class="field-hint">
+                  Use os aliases exibidos nos arquivos para referenciá-los. O
+                  texto deste campo será enviado à IA; não inclua registros ou
+                  dados sensíveis.
+                </p>
+              </div>
+              <div class="form-section">
+                <label class="choice"><input id="allow-data-sample" type="checkbox" />
+                  <span><strong>Permitir amostra de dados</strong><small>Enviar até 5 linhas por arquivo ao LLM para planejar o tratamento.</small></span>
+                </label>
+              </div>
+              <div class="form-section">
+                <label for="pipeline-mode">Como organizar a saída</label>
+                <select id="pipeline-mode">
+                  <option value="separate">
+                    Tratar cada arquivo separadamente
+                  </option>
+                  <option value="joined">Conectar arquivos por joins</option>
+                </select>
+              </div>
+              <div class="form-section">
+                <p class="field-label" id="autonomy-label">
+                  Quem decide as etapas?
+                </p>
+                <div
+                  class="autonomy-options"
+                  role="radiogroup"
+                  aria-labelledby="autonomy-label"
+                >
+                  <label class="choice"
+                    ><input
+                      type="radio"
+                      name="autonomy"
+                      value="supervised"
+                      checked
+                    /><span
+                      ><strong>Supervisionado</strong
+                      ><small>Você revisa ou delega cada etapa.</small></span
+                    ></label
+                  >
+                  <label class="choice"
+                    ><input
+                      type="radio"
+                      name="autonomy"
+                      value="autonomous"
+                    /><span
+                      ><strong>Autônomo</strong
+                      ><small>O sistema decide e executa tudo.</small></span
+                    ></label
+                  >
+                </div>
+                <p class="field-hint" id="autonomy-hint">
+                  Mesmo durante a revisão, você pode delegar uma etapa ou todas
+                  as restantes.
+                </p>
+              </div>
+            </fieldset>
+            <button
+              type="submit"
+              id="create-pipeline"
+              class="button button-primary button-full"
+            >
+              <svg class="icon"><use href="#i-spark" /></svg
+              ><span>Gerar pipeline</span
+              ><svg class="icon button-trailing"><use href="#i-arrow" /></svg>
+            </button>
+            <p class="submit-hint" id="compose-status" aria-live="polite">
+              Primeiro, veja o plano. Depois, inicie a execução.
+            </p>
+          </form>
+          <div class="privacy-note">
+            <svg class="icon"><use href="#i-shield" /></svg>
+            <p>
+              <strong>Privacidade em cada etapa</strong>A IA recebe nomes de
+              colunas, tipos, formatos e estatísticas; até 5 linhas por arquivo quando autorizado. As células são
+              processadas localmente com pandas.
+            </p>
+          </div>
+        </section>
+
+        <section
+          class="panel execution"
+          aria-labelledby="execution-title"
+          aria-busy="false"
+          id="execution-panel"
+        >
+          <div class="panel-heading execution-heading">
+            <span class="section-number">02</span>
+            <div>
+              <h2 id="execution-title">Seu pipeline</h2>
+              <p>Do planejamento ao conjunto de dados pronto.</p>
+            </div>
+            <span class="status-badge" id="status-badge"
+              >Aguardando arquivos</span
+            >
+          </div>
+          <ol class="phase-bar" aria-label="Progresso">
+            <li data-phase="configure" class="active">
+              <span>1</span>Configurar
+            </li>
+            <li data-phase="plan"><span>2</span>Planejar</li>
+            <li data-phase="execute"><span>3</span>Executar</li>
+          </ol>
+          <p class="visually-hidden" id="execution-status" role="status"></p>
+
+          <div id="empty-state" class="empty-state">
+            <div class="flow-illustration" aria-hidden="true">
+              <span class="flow-file"
+                ><svg class="icon"><use href="#i-file" /></svg
+                ><small>CSV</small></span
+              ><span class="flow-line"></span
+              ><span class="flow-center"
+                ><svg class="icon"><use href="#i-layers" /></svg></span
+              ><span class="flow-line"></span
+              ><span class="flow-result"
+                ><svg class="icon"><use href="#i-check" /></svg
+              ></span>
+            </div>
+            <h3>Um caminho claro para seus dados.</h3>
+            <p>
+              Adicione os arquivos e descreva seu objetivo.<br />As etapas de
+              tratamento vão aparecer aqui.
+            </p>
+            <div class="empty-features">
+              <span>Tipos e formatos</span><span>Limpeza de dados</span
+              ><span>Joins entre CSVs</span>
+            </div>
+          </div>
+
+          <div id="pipeline-content" class="pipeline-content" hidden>
+            <div class="run-summary">
+              <div>
+                <span class="eyebrow">EXECUÇÃO</span
+                ><code id="pipeline-id"></code>
+              </div>
+              <button
+                id="refresh-pipeline"
+                class="button button-quiet"
+                type="button"
+              >
+                Atualizar estado
+              </button>
+            </div>
+            <div id="decision-panel" class="decision-panel" hidden>
+              <span class="eyebrow">SUA DECISÃO</span>
+              <h3 id="decision-title">Como seguimos nesta etapa?</h3>
+              <p id="decision-reason"></p>
+              <p class="decision-question">
+                Você decide esta etapa ou delega ao sistema?
+              </p>
+              <div class="decision-actions">
+                <button
+                  class="button button-primary"
+                  data-decision="approve"
+                  type="button"
+                >
+                  Aprovar etapa</button
+                ><button
+                  class="button button-secondary"
+                  data-decision="delegate_step"
+                  type="button"
+                >
+                  Sistema decide esta etapa
+                </button>
+              </div>
+              <details id="step-editor">
+                <summary>Ajustar a etapa antes de aprovar</summary>
+                <label class="visually-hidden" for="step-json"
+                  >Definição JSON da etapa</label
+                ><textarea
+                  id="step-json"
+                  rows="10"
+                  spellcheck="false"
+                ></textarea>
+                <p class="field-hint">
+                  Edite os parâmetros e preserve o id. O ajuste será validado
+                  antes da execução.
+                </p>
+                <button
+                  id="approve-edited"
+                  type="button"
+                  class="button button-secondary"
+                >
+                  Aprovar com ajustes
+                </button>
+              </details>
+              <div class="decision-secondary">
+                <button
+                  class="text-button"
+                  data-decision="delegate_remaining"
+                  type="button"
+                >
+                  Delegar todas as próximas etapas</button
+                ><button
+                  class="text-button text-danger"
+                  data-decision="cancel"
+                  type="button"
+                >
+                  Cancelar execução
+                </button>
+              </div>
+            </div>
+            <div id="ready-panel" class="ready-panel" hidden>
+              <p>
+                Revise as etapas abaixo. O plano ainda não alterou os arquivos.
+              </p>
+              <button
+                id="run-pipeline"
+                class="button button-primary"
+                type="button"
+              >
+                <svg class="icon"><use href="#i-arrow" /></svg>Executar pipeline
+              </button>
+            </div>
+            <div id="pipeline-error" class="notice" role="alert" hidden></div>
+            <div class="timeline-heading">
+              <h3>Etapas de tratamento</h3>
+              <span id="step-count"></span>
+            </div>
+            <ol id="step-list" class="step-list"></ol>
+            <div id="results" class="results" hidden>
+              <div class="results-heading">
+                <svg class="icon"><use href="#i-check" /></svg>
+                <div>
+                  <h3>Dados prontos para usar</h3>
+                  <p>
+                    Baixe os novos conjuntos. Os arquivos originais foram
+                    preservados.
+                  </p>
+                </div>
+              </div>
+              <ul id="output-list" class="output-list"></ul>
+            </div>
+            <details class="plan-details">
+              <summary>Ver plano completo em JSON</summary>
+              <pre id="plan-json"></pre>
+            </details>
+          </div>
+          <div class="execution-footer">
+            <span class="footer-dot"></span>Planejado pela IA<span
+              class="footer-separator"
+              >/</span
+            >Executado localmente<span class="footer-separator">/</span>Decisões
+            registradas
+          </div>
+        </section>
+      </div>
+      <footer class="page-footer">
+        <span
+          >Estúdio de dados <span class="footer-separator">/</span> Ambiente de
+          testes</span
+        ><a href="/docs" target="_blank" rel="noopener"
+          >Documentação da API <span aria-hidden="true">↗</span></a
+        >
+      </footer>
+    </main>
+  </body>
+</html>

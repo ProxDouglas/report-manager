@@ -1,3 +1,6 @@
+> Documentação histórica: o fluxo de análise direta sobre bancos foi removido.
+> O processamento atual ocorre nos [pipelines de dados](data_pipelines.md).
+
 # Catálogo de métricas
 
 O catálogo é a allowlist semântica usada pela aplicação para interpretar

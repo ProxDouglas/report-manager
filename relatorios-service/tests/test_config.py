@@ -28,12 +28,22 @@ def run_python(code: str, env: dict[str, str]) -> subprocess.CompletedProcess:
 
 
 class ConfigurationLoadingTests(unittest.TestCase):
+    def test_cli_help_does_not_import_removed_settings_singleton(self):
+        result = run_python(
+            "import sys\n"
+            "from relatorios_service import main\n"
+            "sys.argv = ['relatorios-service', '--help']\n"
+            "main()\n",
+            env={},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--reload", result.stdout)
+
     def test_importing_services_does_not_read_settings(self):
         result = run_python(
             "import relatorios_service.common.dependencies\n"
-            "import relatorios_service.database\n"
             "import relatorios_service.llm\n"
-            "import relatorios_service.services.analysis_service\n",
+            "import relatorios_service.services.pipeline_service\n",
             env={},
         )
 
@@ -53,27 +63,6 @@ class ConfigurationLoadingTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("openai_api_key", result.stderr)
-
-    def test_audit_log_is_enabled_by_default_in_logs_directory(self):
-        result = run_python(
-            "from relatorios_service.config import get_settings\n"
-            "settings = get_settings()\n"
-            "print(settings.audit_log_enabled, settings.audit_log_file)\n",
-            env=CONFIG_ENV,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "True logs/auditoria.txt")
-
-    def test_audit_log_can_be_disabled_by_environment(self):
-        result = run_python(
-            "from relatorios_service.config import get_settings\n"
-            "print(get_settings().audit_log_enabled)\n",
-            env={**CONFIG_ENV, "AUDIT_LOG_ENABLED": "false"},
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "False")
 
     def test_application_is_built_on_first_access(self):
         result = run_python(
